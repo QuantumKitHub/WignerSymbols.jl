@@ -89,9 +89,6 @@ Also uses ideas from
 
 [2] [J. Rasch and A. C. H. Yu, SIAM Journal on Scientific Compututing 25 (2003), 1416–1428](https://doi.org/10.1137/S1064827503422932)
 
-for caching the computed 3j and 6j symbols.
-
-## Todo
-*   Wigner 9-j symbols, as explained in [1] and based on
+for caching the computed 3j and 6j symbols. Wigner 9-j symbol implementation is based on
 
     [3] [L. Wei, New formula for 9-j symbols and their direct calculation, Computers in Physics, 12 (1998), 632–634.](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.481.5946&rep=rep1&type=pdf)
