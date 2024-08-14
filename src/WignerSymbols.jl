@@ -1,11 +1,12 @@
 module WignerSymbols
-export δ, Δ, clebschgordan, wigner3j, wigner6j, racahV, racahW, HalfInteger
+export δ, Δ, clebschgordan, wigner3j, wigner6j, wigner9j, racahV, racahW, HalfInteger
 
 using HalfIntegers
 using RationalRoots
 using LRUCache
 const RRBig = RationalRoot{BigInt}
 import RationalRoots: _convert
+using Combinatorics
 
 include("growinglist.jl")
 include("bigint.jl") # additional GMP BigInt functionality not wrapped in Base.GMP.MPZ
@@ -14,15 +15,20 @@ convert(BigInt, primefactorial(401)) # trigger compilation and generate some fix
 
 const Key3j = Tuple{UInt,UInt,UInt,Int,Int}
 const Key6j = NTuple{6,UInt}
+const Key9j = NTuple{9,HalfInteger}
 
 const Wigner3j = LRU{Key3j,Tuple{Rational{BigInt},Rational{BigInt}}}(; maxsize = 10^6)
 const Wigner6j = LRU{Key6j,Tuple{Rational{BigInt},Rational{BigInt}}}(; maxsize = 10^6)
+const Wigner9j = LRU{Key9j,Tuple{Rational{BigInt},Rational{BigInt}}}(; maxsize = 10^6)
 
 function set_buffer3j_size!(; maxsize)
     resize!(Wigner3j; maxsize = maxsize)
 end
 function set_buffer6j_size!(; maxsize)
     resize!(Wigner6j; maxsize = maxsize)
+end
+function set_buffer9j_size!(; maxsize)
+    resize!(Wigner9j; maxsize = maxsize)
 end
 
 # check integerness and correctness of (j,m) angular momentum
@@ -242,6 +248,75 @@ function racahW(T::Type{<:Real}, j₁, j₂, J, j₃, J₁₂, J₂₃)
     end
 end
 
+"""
+    wigner9j(T::Type{<:Real} = RationalRoot{BigInt}, j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉) -> ::T
+
+Compute the value of the Wigner-9j symbol
+⎧ j₁ j₂ j₃ ⎫
+⎨	j₄ j₅ j₆ ⎬
+⎩	j₇ j₈ j₉ ⎭
+as a type `T` real number. By default `T = RationalRoot{BigInt}`.
+
+Returns `zero(T)` if any of the triangle conditions TODO 
+are not satisfied, but throws a `DomainError` if
+the `jᵢ`s are not integer or halfinteger.
+"""
+wigner9j(j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉) = wigner9j(RRBig, j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉)
+function wigner9j(T::Type{<:Real}, j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉) 
+    # check validity of `jᵢ`s
+    for jᵢ in (j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉)
+        (ishalfinteger(jᵢ) && jᵢ >= zero(jᵢ)) || throw(DomainError("invalid jᵢ", jᵢ))
+    end
+    return _wigner9j(T, HalfInteger.((j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉))...)
+end
+
+_perms9j = [(i, j) for i in Combinatorics.permutations([1, 2, 3]), 
+                       j in Combinatorics.permutations([1, 2, 3])]
+
+function _wigner9j(T::Type{<:Real}, j₁::HalfInteger, j₂::HalfInteger, j₃::HalfInteger, 
+                                    j₄::HalfInteger, j₅::HalfInteger, j₆::HalfInteger,
+                                    j₇::HalfInteger, j₈::HalfInteger, j₉::HalfInteger)
+  
+    # check triangle conditions 
+    if !(δ(j₁, j₂, j₃) && δ(j₄, j₅, j₆) && δ(j₇, j₈, j₉) && δ(j₁, j₄, j₇) && δ(j₂, j₅, j₈) && δ(j₃, j₆, j₉))
+        return zero(T)
+    end
+   
+    # dictionary lookup, check all 72 permutations 
+    k = [j₁ j₂ j₃; j₄ j₅ j₆; j₇ j₈ j₉]
+    for p in _perms9j
+        kk = tuple(reshape(k[p...], 9))
+        kkT = tuple(reshape(transpose(k[p...]), 9))
+        if haskey(Wigner9j, kk)
+            r, s = Wigner9j[kk]
+            return _convert(T, s) * convert(T, signedroot(r))
+        elseif haskey(Wigner9j, kkT)
+            r, s = Wigner9j[kkT]
+            return _convert(T, s) * convert(T, signedroot(r)) 
+        end
+    end
+
+    # order irrelevant: product remains the same
+    n₁, d₁ = Δ²(j₁, j₂, j₃)
+    n₂, d₂ = Δ²(j₄, j₅, j₆)
+    n₃, d₃ = Δ²(j₇, j₈, j₉)
+    n₄, d₄ = Δ²(j₁, j₄, j₇)
+    n₅, d₅ = Δ²(j₂, j₅, j₈)
+    n₆, d₆ = Δ²(j₃, j₆, j₉) 
+
+    snum, rnum = splitsquare(n₁ * n₂ * n₃ * n₄ * n₅ * n₆)
+    sden, rden = splitsquare(d₁ * d₂ * d₃ * d₄ * d₅ * d₆)
+    snum, sden = divgcd!(snum, sden)
+    rnum, rden = divgcd!(rnum, rden) 
+    s = Base.unsafe_rational(convert(BigInt, snum), convert(BigInt, sden))
+    r = Base.unsafe_rational(convert(BigInt, rnum), convert(BigInt, rden))
+    s *= compute9jseries(j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉)
+
+    Wigner9j[(j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉)] = (r, s)
+    return _convert(T, s) * convert(T, signedroot(r))
+end
+
+
 # COMPUTATIONAL ROUTINES
 #------------------------
 # squared triangle coefficient
@@ -312,7 +387,6 @@ function compute3jseries(β₁, β₂, β₃, α₁, α₂)
     end
     den = commondenominator!(nums, dens)
     totalnum = sumlist!(nums)
-    totalden = convert(BigInt, den)
     for n = 1:length(den.powers)
         p = bigprime(n)
         while den.powers[n] > 0
@@ -365,13 +439,94 @@ function compute6jseries(β₁, β₂, β₃, α₁, α₂, α₃, α₄)
     return Base.unsafe_rational(totalnum, totalden)
 end
 
+# compute the sum appearing in the 9j symbol
+function compute9jseries(a, b, c, d, e, f, g, h, j)
+    I1 = max(abs(h - d), abs(b - f), abs(a - j))
+    I2 = min(h + d, b + f, a + j)
+    krange = I1:I2
+    
+    sum(krange) do k
+        p = iseven(2k) ? big(2k+1) : big(-(2k+1))
+        
+        b₁ = let (m₁, m₂, m₃, m₄, m₅, m₆) = (a, b, c, f, j, k)     
+            α₁ = convert(BigInt, m₁ + m₅ - m₆)
+            α₂ = convert(BigInt, m₁ - m₅ + m₆)
+            α₃ = convert(BigInt, -m₁ + m₅ + m₆)
+            β₁ = convert(BigInt, m₁ + m₅ + m₆)
+            β₂ = convert(BigInt, m₂ + m₄ + m₆)
+            β₃ = convert(BigInt, m₃ + m₄ + m₅)
+            β₀ = convert(BigInt, m₁ + m₂ + m₃)
+            wei9jbracket(α₁, α₂, α₃, β₁, β₂, β₃, β₀)
+        end
+        
+        b₂ = let (m₁, m₂, m₃, m₄, m₅, m₆) = (f, d, e, h, b, k)
+            α₁ = convert(BigInt, m₁ + m₅ - m₆)
+            α₂ = convert(BigInt, m₁ - m₅ + m₆)
+            α₃ = convert(BigInt, -m₁ + m₅ + m₆)
+            β₁ = convert(BigInt, m₁ + m₅ + m₆)
+            β₂ = convert(BigInt, m₂ + m₄ + m₆)
+            β₃ = convert(BigInt, m₃ + m₄ + m₅)
+            β₀ = convert(BigInt, m₁ + m₂ + m₃)
+            wei9jbracket(α₁, α₂, α₃, β₁, β₂, β₃, β₀)
+        end
+
+        b₃ = let (m₁, m₂, m₃, m₄, m₅, m₆) = (h, j, g, a, d, k) 
+            α₁ = convert(BigInt, m₁ + m₅ - m₆)
+            α₂ = convert(BigInt, m₁ - m₅ + m₆)
+            α₃ = convert(BigInt, -m₁ + m₅ + m₆)
+            β₁ = convert(BigInt, m₁ + m₅ + m₆)
+            β₂ = convert(BigInt, m₂ + m₄ + m₆)
+            β₃ = convert(BigInt, m₃ + m₄ + m₅)
+            β₀ = convert(BigInt, m₁ + m₂ + m₃)
+            wei9jbracket(α₁, α₂, α₃, β₁, β₂, β₃, β₀)
+        end
+        
+        p * b₁ * b₂ * b₃
+    end
+end
+
+# A cached binomial implementation
+bcache = LRU{Tuple{BigInt, BigInt}, BigInt}(; maxsize=10^6)
+function cbinomial(n::BigInt, k::BigInt)
+    if k == 0
+        return 1 // big(1)
+    end # guard
+    if haskey(bcache, (n, k))
+        return bcache[(n, k)]
+    else
+        res = ((n + 1 - k) // k) * cbinomial(n, k - 1)
+        bcache[(n, k)] = res
+        return res
+    end
+end
+
+export wei9jbracket
+# Wei square bracket terms appearing the 9j series
+function wei9jbracket(α₁::BigInt, α₂::BigInt, α₃::BigInt, β₁::BigInt, β₂::BigInt, β₃::BigInt, β₀::BigInt) 
+    p = max(β₁, β₂, β₃, β₀)
+    q = min(α₁ + β₂, α₂ + β₃, α₃ + β₀)
+    lrange = p:q
+   
+    sum(lrange) do l
+        b₁ = iseven(l) ? cbinomial(big(l + 1), l - β₁) : -cbinomial(big(l + 1), l - β₁)
+        b₂ = cbinomial(α₁, l - β₂)
+        b₃ = cbinomial(α₂, l - β₃)
+        b₄ = cbinomial(α₃, l - β₀) 
+
+        b₁ * b₂ * b₃ * b₄
+    end 
+end
+
 function _precompile_()
     @assert precompile(wigner3j, (Type{Float64}, Int, Int, Int, Int, Int, Int))
     @assert precompile(wigner6j, (Type{Float64}, Int, Int, Int, Int, Int, Int))
+    @assert precompile(wigner9j, (Type{Float64}, Int, Int, Int, Int, Int, Int, Int, Int, Int))
     @assert precompile(wigner3j, (Type{BigFloat}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}))
     @assert precompile(wigner6j, (Type{BigFloat}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}))
+    @assert precompile(wigner9j, (Type{BigFloat}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}))
     @assert precompile(wigner3j, (Type{RRBig}, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt))
     @assert precompile(wigner6j, (Type{RRBig}, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt))
+    @assert precompile(wigner9j, (Type{RRBig}, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt))
 end
 _precompile_()
 
