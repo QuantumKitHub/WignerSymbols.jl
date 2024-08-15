@@ -385,6 +385,7 @@ function sumlist!(list::Vector{<:PrimeFactorization}, ind = 1:length(list))
     return MPZ.mul!(s, _convert!(i, g))
 end
 
+#=
 # A cached binomial implementation
 bcache = LRU{Tuple{BigInt, BigInt}, PrimeFactorization}(; maxsize=10^6)
 function primebinomial(n::BigInt, k::BigInt)
@@ -402,3 +403,12 @@ function primebinomial(n::BigInt, k::BigInt)
         return res
     end
 end
+=#
+
+function primebinomial(n::BigInt, k::BigInt)
+    num = copy(primefactorial(n))
+    den = mul!(copy(primefactorial(k)), primefactorial(n - k))
+    return divexact!(num, den)
+end
+
+
