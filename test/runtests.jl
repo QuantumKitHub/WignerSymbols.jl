@@ -211,7 +211,7 @@ end
 
 @threads for i = 1:N
     @testset "wigner9j: relation to sum over 6j products, thread $i" begin
-        for k = 1:1000
+        for k = 1:10_000
             @testset let (j1, j2, j3, j4, j5, j6, j7, j8, j9) = rand(smalljlist, 9)
                 @test wigner9j(j1, j2, j3, 
                            j4, j5, j6, 
