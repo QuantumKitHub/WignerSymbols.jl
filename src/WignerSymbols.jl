@@ -481,10 +481,6 @@ function compute9jseries(a, b, c, d, e, f, g, h, j)
             wei9jbracket(α₁, α₂, α₃, β₁, β₂, β₃, β₀)
         end
 
-        p * b₁ * b₂ * b₃
-    end
-end
-
 export wei9jbracket
 # Wei square bracket terms appearing the 9j series
 function wei9jbracket(α₁::BigInt, α₂::BigInt, α₃::BigInt, β₁::BigInt, β₂::BigInt, β₃::BigInt, β₀::BigInt) 
