@@ -489,12 +489,12 @@ end
 bcache = LRU{Tuple{BigInt, BigInt}, BigInt}(; maxsize=10^6)
 function cbinomial(n::BigInt, k::BigInt)
     if k == 0
-        return 1 // big(1)
+        return big(1)
     end # guard
     if haskey(bcache, (n, k))
         return bcache[(n, k)]
     else
-        res = ((n + 1 - k) // k) * cbinomial(n, k - 1)
+        res = convert(BigInt, cbinomial(n, k - 1) * (n + 1 - k) // k)
         bcache[(n, k)] = res
         return res
     end
