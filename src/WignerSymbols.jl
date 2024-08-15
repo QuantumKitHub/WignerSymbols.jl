@@ -480,6 +480,7 @@ function compute9jseries(a, b, c, d, e, f, g, h, j)
             β₀ = convert(BigInt, m₁ + m₂ + m₃)
             wei9jbracket(α₁, α₂, α₃, β₁, β₂, β₃, β₀)
         end
+end
 
 export wei9jbracket
 # Wei square bracket terms appearing the 9j series
