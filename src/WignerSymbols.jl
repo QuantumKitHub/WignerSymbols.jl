@@ -444,10 +444,10 @@ function compute9jseries(a, b, c, d, e, f, g, h, j)
     I1 = max(abs(h - d), abs(b - f), abs(a - j))
     I2 = min(h + d, b + f, a + j)
     krange = I1:I2
-    
+ 
     sum(krange) do k
-        p = iseven(2k) ? big(2k+1) : big(-(2k+1))
-        
+        p = iseven(2k) ? big(2k + 1) : -big(2k + 1)
+
         b₁ = let (m₁, m₂, m₃, m₄, m₅, m₆) = (a, b, c, f, j, k)     
             α₁ = convert(BigInt, m₁ + m₅ - m₆)
             α₂ = convert(BigInt, m₁ - m₅ + m₆)
@@ -480,25 +480,6 @@ function compute9jseries(a, b, c, d, e, f, g, h, j)
             β₀ = convert(BigInt, m₁ + m₂ + m₃)
             wei9jbracket(α₁, α₂, α₃, β₁, β₂, β₃, β₀)
         end
-        
-        p * b₁ * b₂ * b₃
-    end
-end
-
-# A cached binomial implementation
-bcache = LRU{Tuple{BigInt, BigInt}, BigInt}(; maxsize=10^6)
-function cbinomial(n::BigInt, k::BigInt)
-    if k == 0
-        return big(1)
-    end # guard
-    if haskey(bcache, (n, k))
-        return bcache[(n, k)]
-    else
-        res = convert(BigInt, cbinomial(n, k - 1) * (n + 1 - k) // k)
-        bcache[(n, k)] = res
-        return res
-    end
-end
 
 export wei9jbracket
 # Wei square bracket terms appearing the 9j series
@@ -506,15 +487,19 @@ function wei9jbracket(α₁::BigInt, α₂::BigInt, α₃::BigInt, β₁::BigInt
     p = max(β₁, β₂, β₃, β₀)
     q = min(α₁ + β₂, α₂ + β₃, α₃ + β₀)
     lrange = p:q
-   
-    sum(lrange) do l
-        b₁ = iseven(l) ? cbinomial(big(l + 1), l - β₁) : -cbinomial(big(l + 1), l - β₁)
-        b₂ = cbinomial(α₁, l - β₂)
-        b₃ = cbinomial(α₂, l - β₃)
-        b₄ = cbinomial(α₃, l - β₀) 
+    T = PrimeFactorization{eltype(eltype(factorialtable))}
 
-        b₁ * b₂ * b₃ * b₄
-    end 
+    terms = Vector{T}(undef, length(lrange))
+    for (j, l) in enumerate(lrange)
+        b₁ = iseven(l) ? copy(primebinomial(big(l + 1), l - β₁)) : neg!(copy(primebinomial(big(l + 1), l - β₁)))
+        b₂ = primebinomial(α₁, l - β₂)
+        b₃ = primebinomial(α₂, l - β₃)
+        b₄ = primebinomial(α₃, l - β₀)
+
+        terms[j] = mul!(mul!(mul!(b₁, b₂), b₃), b₄)
+    end
+    total = sumlist!(terms)
+    return total
 end
 
 function _precompile_()
