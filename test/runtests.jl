@@ -294,3 +294,31 @@ end
     @test length(W.Wigner3jFloat.lru) > 0 && length(W.Wigner6jFloat.lru) > 0
     @test_throws DomainError wigner6j(1, 2, 3, 4, 5, 1 // 3)
 end
+
+@testset "argument handling" begin
+    # different argument types give identical results
+    for (j1, j2, j3, m1, m2) in ((1 // 2, 3 // 2, 1, -1 // 2, 3 // 2), (2, 3, 4, -1, 2), (5 // 2, 5 // 2, 2, 1 // 2, -3 // 2))
+        x = wigner3j(Float64, j1, j2, j3, m1, m2)
+        @test wigner3j(Float64, WignerSymbols.HalfInt.((j1, j2, j3, m1, m2))...) === x
+        @test wigner3j(Float64, Float64.((j1, j2, j3, m1, m2))...) === x
+        @test wigner3j(Float64, j1, j2, j3, m1, m2, -m1 - m2) === x
+        @test wigner3j(j1, j2, j3, m1, m2) == wigner3j(j1, j2, j3, m1, m2, -m1 - m2)
+        @test clebschgordan(Float64, j1, m1, j2, m2, j3) === clebschgordan(Float64, j1, m1, j2, m2, j3, m1 + m2)
+        @test racahV(Float64, j1, j2, j3, m1, m2) === racahV(Float64, j1, j2, j3, m1, m2, -m1 - m2)
+    end
+    # vanishing symbols
+    @test wigner3j(Float64, 1, 1, 3, 0, 0) === 0.0                 # triangle condition
+    @test wigner3j(Float64, 1, 1, 1, 1, 0, 0) === 0.0              # m₁+m₂+m₃ ≠ 0
+    @test racahV(1, 1, 3, 0, 0) == 0
+    @test wigner6j(Float64, 1, 1, 3, 1, 1, 1) === 0.0
+    @test wigner6j(Float64, 1 // 2, 1 // 2, 1 // 2, 1, 1, 1) === 0.0
+    @test racahW(1 // 2, 1 // 2, 1, 1 // 2, 1, 1) == 0
+    # invalid arguments
+    @test_throws DomainError wigner3j(1, 1, 1, 2, -2)       # |m| > j
+    @test_throws DomainError wigner3j(1, 1, 1, 1 // 2, -1 // 2) # j - m not integer
+    @test_throws DomainError wigner3j(1 // 3, 1, 1, 0, 0)
+    @test_throws DomainError wigner3j(-1, 1, 1, 0, 0)
+    @test_throws DomainError clebschgordan(1, 0, 1, 1 // 3, 1)
+    @test_throws DomainError wigner6j(-1, 1, 1, 1, 1, 1)
+    @test_throws DomainError wigner6j(0.3, 1, 1, 1, 1, 1)
+end

@@ -5,7 +5,6 @@ using HalfIntegers
 using RationalRoots
 using LRUCache
 const RRBig = RationalRoot{BigInt}
-import RationalRoots: _convert
 
 include("growinglist.jl")
 include("primefactorization.jl")
@@ -74,7 +73,21 @@ function set_table6j_size!(; jmax)
 end
 
 # check integerness and correctness of (j,m) angular momentum
-ϵ(j, m) = (abs(m) <= j && ishalfinteger(j) && isinteger(j-m) && isinteger(j+m))
+ϵ(j, m) = (abs(m) <= j) & ishalfinteger(j) & isinteger(j - m) & isinteger(j + m)
+
+# conversion to `HalfInt`, or `nothing` if `x` is not a (half)integer; unlike `HalfInt(x)`,
+# this does not throw, and it avoids rational arithmetic for `Rational` arguments
+@inline _halfint(x::Integer) = HalfInt(x)
+@inline _halfint(x::HalfInteger) = HalfInt(x)
+@inline function _halfint(x::Rational)
+    d = denominator(x)
+    d == 1 && return half(HalfInt, 2 * convert(Int, numerator(x)))
+    d == 2 && return half(HalfInt, convert(Int, numerator(x)))
+    return nothing
+end
+@inline _halfint(x::Real) = ishalfinteger(x) ? HalfInt(x) : nothing
+# for arguments that are known to be valid
+@inline _halfint!(x) = _halfint(x)::HalfInt
 
 # check triangle condition
 """
@@ -82,7 +95,7 @@ end
 
 Checks the triangle conditions `j₃ <= j₁ + j₂`, `j₁ <= j₂ + j₃` and `j₂ <= j₃ + j₁`.
 """
-δ(j₁, j₂, j₃) = (j₃ <= j₁ + j₂) && (j₁ <= j₂ + j₃) && (j₂ <= j₃ + j₁) && isinteger(j₁+j₂+j₃)
+δ(j₁, j₂, j₃) = (j₃ <= j₁ + j₂) & (j₁ <= j₂ + j₃) & (j₂ <= j₃ + j₁) & isinteger(j₁ + j₂ + j₃)
 
 # triangle coefficient
 """
@@ -119,24 +132,52 @@ as a type `T` real number. By default, `T = RationalRoot{BigInt}` and `m₃ = -m
 Returns `zero(T)` if the triangle condition `δ(j₁, j₂, j₃)` is not satisfied, but
 throws a `DomainError` if the `jᵢ`s and `mᵢ`s are not (half)integer or `abs(mᵢ) > jᵢ`.
 """
-wigner3j(j₁, j₂, j₃, m₁, m₂, m₃ = -m₁-m₂) = wigner3j(RRBig, j₁, j₂, j₃, m₁, m₂, m₃)
-function wigner3j(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂, m₃ = -m₁-m₂)
-    # check angular momenta
-    for (jᵢ,mᵢ) in ((j₁, m₁), (j₂, m₂), (j₃, m₃))
-        ϵ(jᵢ, mᵢ) || throw(DomainError((jᵢ, mᵢ), "invalid combination (jᵢ, mᵢ)"))
+wigner3j(j₁, j₂, j₃, m₁, m₂) = wigner3j(RRBig, j₁, j₂, j₃, m₁, m₂)
+wigner3j(j₁, j₂, j₃, m₁, m₂, m₃) = wigner3j(RRBig, j₁, j₂, j₃, m₁, m₂, m₃)
+function wigner3j(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂)
+    j₁′, j₂′, j₃′, m₁′, m₂′ = _halfint(j₁), _halfint(j₂), _halfint(j₃), _halfint(m₁), _halfint(m₂)
+    if isnothing(j₁′) || isnothing(j₂′) || isnothing(j₃′) || isnothing(m₁′) || isnothing(m₂′)
+        _throw3j(j₁, j₂, j₃, m₁, m₂, -m₁ - m₂)
     end
-    return _wigner3j(T, HalfInteger.((j₁, j₂, j₃, m₁, m₂, m₃))...)
+    m₃′ = -m₁′ - m₂′
+    ϵ(j₁′, m₁′) & ϵ(j₂′, m₂′) & ϵ(j₃′, m₃′) || _throw3j(j₁, j₂, j₃, m₁, m₂, -m₁ - m₂)
+    return _wigner3j(T, j₁′, j₂′, j₃′, m₁′, m₂′, m₃′)
+end
+function wigner3j(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂, m₃)
+    j₁′, j₂′, j₃′ = _halfint(j₁), _halfint(j₂), _halfint(j₃)
+    m₁′, m₂′, m₃′ = _halfint(m₁), _halfint(m₂), _halfint(m₃)
+    if isnothing(j₁′) || isnothing(j₂′) || isnothing(j₃′) ||
+            isnothing(m₁′) || isnothing(m₂′) || isnothing(m₃′)
+        _throw3j(j₁, j₂, j₃, m₁, m₂, m₃)
+    end
+    ϵ(j₁′, m₁′) & ϵ(j₂′, m₂′) & ϵ(j₃′, m₃′) || _throw3j(j₁, j₂, j₃, m₁, m₂, m₃)
+    return _wigner3j(T, j₁′, j₂′, j₃′, m₁′, m₂′, m₃′)
 end
 
-function _wigner3j(T::Type{<:Real}, j₁::HalfInteger, j₂::HalfInteger, j₃::HalfInteger,
-                                    m₁::HalfInteger, m₂::HalfInteger, m₃::HalfInteger)
-    # check triangle condition and m₁+m₂+m₃ == 0
-    if !δ(j₁, j₂, j₃) || !iszero(m₁+m₂+m₃)
-        return zero(T)
+@noinline function _throw3j(j₁, j₂, j₃, m₁, m₂, m₃)
+    for (jᵢ, mᵢ) in ((j₁, m₁), (j₂, m₂), (j₃, m₃))
+        ϵ(jᵢ, mᵢ) || throw(DomainError((jᵢ, mᵢ), "invalid combination (jᵢ, mᵢ)"))
     end
+    # not reached, but guarantees that this function never returns, which allows the
+    # compiler to exclude `nothing` from the converted arguments at the call sites
+    throw(ArgumentError("arguments do not fit in `HalfInt`"))
+end
 
+# for valid (jᵢ, mᵢ)
+@inline function _wigner3j(
+        T::Type{<:Real}, j₁::HalfInt, j₂::HalfInt, j₃::HalfInt,
+        m₁::HalfInt, m₂::HalfInt, m₃::HalfInt
+    )
+    iszero(m₁ + m₂ + m₃) || return zero(T)
+    # the triangle condition holds iff all entries of the Regge square are non-negative integers
+    entries = _reggeentries(j₁, j₂, j₃, m₁, m₂, m₃)
+    valid = true
+    for r in entries
+        valid &= (r >= 0) & isinteger(r)
+    end
+    valid || return zero(T)
     # canonical form under all 72 symmetries, using the Regge square
-    R = ReggeSquare(j₁, j₂, j₃, m₁, m₂, m₃)
+    R = ReggeSquare(map(r -> convert(Int, r), entries))
     key, odd = canonicalize(R)
     # odd permutations of rows or columns of R yield a sign (-1)^J
     return _value(T, key, odd & isodd(sumJ(R)))
@@ -158,7 +199,7 @@ function _value(T::Type{<:Real}, key, flip::Bool = false)
         cache[key] = rs
     end
     r, s = rs
-    return _convert(T, flip ? -s : s) * convert(T, signedroot(r))
+    return convert(T, flip ? -s : s) * convert(T, signedroot(r))
 end
 
 """
@@ -170,14 +211,26 @@ as a type `T` real number. By default, `T = RationalRoot{BigInt}` and `m₃ = m�
 Returns `zero(T)` if the triangle condition `δ(j₁, j₂, j₃)` is not satisfied, but
 throws a `DomainError` if the `jᵢ`s and `mᵢ`s are not (half)integer or `abs(mᵢ) > jᵢ`.
 """
-clebschgordan(j₁, m₁, j₂, m₂, j₃, m₃ = m₁+m₂) =
-    clebschgordan(RRBig, j₁, m₁, j₂, m₂, j₃, m₃)
-function clebschgordan(T::Type{<:Real}, j₁, m₁, j₂, m₂, j₃, m₃ = m₁+m₂)
+clebschgordan(j₁, m₁, j₂, m₂, j₃) = clebschgordan(RRBig, j₁, m₁, j₂, m₂, j₃)
+clebschgordan(j₁, m₁, j₂, m₂, j₃, m₃) = clebschgordan(RRBig, j₁, m₁, j₂, m₂, j₃, m₃)
+function clebschgordan(T::Type{<:Real}, j₁, m₁, j₂, m₂, j₃)
+    s = wigner3j(T, j₁, j₂, j₃, m₁, m₂)
+    iszero(s) && return s
+    # arguments are valid if s is nonzero
+    return _clebschgordan(T, s, _halfint!(j₁), _halfint!(j₂), _halfint!(j₃), _halfint!(m₁) + _halfint!(m₂))
+end
+function clebschgordan(T::Type{<:Real}, j₁, m₁, j₂, m₂, j₃, m₃)
     s = wigner3j(T, j₁, j₂, j₃, m₁, m₂, -m₃)
     iszero(s) && return s
-    s *= convert(T, signedroot(RRBig, j₃+j₃+one(j₃)))
-    return isodd(convert(Int,j₁ - j₂ + m₃)) ? -s : s
+    # arguments are valid if s is nonzero
+    return _clebschgordan(T, s, _halfint!(j₁), _halfint!(j₂), _halfint!(j₃), _halfint!(m₃))
 end
+function _clebschgordan(T::Type{<:Real}, s, j₁::HalfInt, j₂::HalfInt, j₃::HalfInt, m₃::HalfInt)
+    s *= _sqrt(T, convert(Int, 2 * j₃ + 1))
+    return isodd(convert(Int, j₁ - j₂ + m₃)) ? -s : s
+end
+_sqrt(T::Type{<:AbstractFloat}, n::Int) = sqrt(convert(T, n))
+_sqrt(T::Type{<:Real}, n::Int) = convert(T, signedroot(RRBig, n))
 
 """
     racahV(T::Type{<:Real} = RationalRoot{BigInt}, j₁, j₂, j₃, m₁, m₂, m₃ = -m₁-m₂) -> ::T
@@ -190,10 +243,12 @@ as a type `T` real number. By default, `T = RationalRoot{BigInt}` and `m₃ = -m
 Returns `zero(T)` if the triangle condition `δ(j₁, j₂, j₃)` is not satisfied, but
 throws a `DomainError` if the `jᵢ`s and `mᵢ`s are not (half)integer or `abs(mᵢ) > jᵢ`.
 """
-racahV(j₁, j₂, j₃, m₁, m₂, m₃ = -m₁-m₂) = racahV(RRBig, j₁, j₂, j₃, m₁, m₂, m₃)
-function racahV(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂, m₃ = -m₁-m₂)
-    s = wigner3j(T, j₁, j₂, j₃, m₁, m₂, m₃)
-    return isodd(convert(Int, -j₁ + j₂ + j₃)) ? -s : s
+racahV(j₁, j₂, j₃, m₁, m₂, m₃...) = racahV(RRBig, j₁, j₂, j₃, m₁, m₂, m₃...)
+function racahV(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂, m₃...)
+    s = wigner3j(T, j₁, j₂, j₃, m₁, m₂, m₃...)
+    iszero(s) && return s
+    # arguments are valid if s is nonzero
+    return isodd(convert(Int, -_halfint!(j₁) + _halfint!(j₂) + _halfint!(j₃))) ? -s : s
 end
 
 """
@@ -210,20 +265,31 @@ the `jᵢ`s are not integer or halfinteger.
 """
 wigner6j(j₁, j₂, j₃, j₄, j₅, j₆) = wigner6j(RRBig, j₁, j₂, j₃, j₄, j₅, j₆)
 function wigner6j(T::Type{<:Real}, j₁, j₂, j₃, j₄, j₅, j₆)
-    # check validity of `jᵢ`s
+    j₁′, j₂′, j₃′, j₄′, j₅′, j₆′ = _halfint(j₁), _halfint(j₂), _halfint(j₃), _halfint(j₄), _halfint(j₅), _halfint(j₆)
+    if isnothing(j₁′) || isnothing(j₂′) || isnothing(j₃′) ||
+            isnothing(j₄′) || isnothing(j₅′) || isnothing(j₆′)
+        _throw6j(j₁, j₂, j₃, j₄, j₅, j₆)
+    end
+    min(j₁′, j₂′, j₃′, j₄′, j₅′, j₆′) >= 0 || _throw6j(j₁, j₂, j₃, j₄, j₅, j₆)
+    return _wigner6j(T, j₁′, j₂′, j₃′, j₄′, j₅′, j₆′)
+end
+
+@noinline function _throw6j(j₁, j₂, j₃, j₄, j₅, j₆)
     for jᵢ in (j₁, j₂, j₃, j₄, j₅, j₆)
         (ishalfinteger(jᵢ) && jᵢ >= zero(jᵢ)) || throw(DomainError(jᵢ, "invalid jᵢ"))
     end
-    return _wigner6j(T, HalfInteger.((j₁, j₂, j₃, j₄, j₅, j₆))...)
+    # not reached, but guarantees that this function never returns, which allows the
+    # compiler to exclude `nothing` from the converted arguments at the call sites
+    throw(ArgumentError("arguments do not fit in `HalfInt`"))
 end
 
-function _wigner6j(T::Type{<:Real}, j₁::HalfInteger, j₂::HalfInteger, j₃::HalfInteger,
-        j₄::HalfInteger, j₅::HalfInteger, j₆::HalfInteger
+# for valid jᵢ
+@inline function _wigner6j(
+        T::Type{<:Real}, j₁::HalfInt, j₂::HalfInt, j₃::HalfInt,
+        j₄::HalfInt, j₅::HalfInt, j₆::HalfInt
     )
     # check triangle conditions
-    if !(δ(j₁, j₂, j₃) && δ(j₁, j₆, j₅) && δ(j₂, j₄, j₆) && δ(j₃, j₄, j₅))
-        return zero(T)
-    end
+    δ(j₁, j₂, j₃) & δ(j₁, j₆, j₅) & δ(j₂, j₄, j₆) & δ(j₃, j₄, j₅) || return zero(T)
     # canonical form under all 144 symmetries
     return _value(T, Key6j(j₁, j₂, j₃, j₄, j₅, j₆))
 end
@@ -242,11 +308,9 @@ the `jᵢ`s and `J`s are not integer or halfinteger.
 racahW(j₁, j₂, J, j₃, J₁₂, J₂₃) = racahW(RRBig, j₁, j₂, J, j₃, J₁₂, J₂₃)
 function racahW(T::Type{<:Real}, j₁, j₂, J, j₃, J₁₂, J₂₃)
     s = wigner6j(T, j₁, j₂, J₁₂, j₃, J, J₂₃)
-    if !iszero(s) && isodd(convert(Int, j₁ + j₂ + j₃ + J))
-        return -s
-    else
-        return s
-    end
+    iszero(s) && return s
+    # arguments are valid if s is nonzero
+    return isodd(convert(Int, _halfint!(j₁) + _halfint!(j₂) + _halfint!(j₃) + _halfint!(J))) ? -s : s
 end
 
 # COMPUTATIONAL ROUTINES

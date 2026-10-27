@@ -8,9 +8,9 @@
 # 3j symbols
 #------------
 """
-    ReggeSquare(j₁, j₂, j₃, m₁, m₂, m₃)
+    ReggeSquare(data::NTuple{9,Int})
 
-Regge square of the 3j symbol with the given arguments, i.e. the 3×3 matrix
+Regge square of a 3j symbol with arguments `(j₁, j₂, j₃, m₁, m₂, m₃)`, i.e. the 3×3 matrix
 ```
 ⎡ -j₁+j₂+j₃  j₁-j₂+j₃  j₁+j₂-j₃ ⎤
 ⎢  j₁-m₁      j₂-m₂     j₃-m₃   ⎥
@@ -24,13 +24,12 @@ columns, the 3j symbol picks up a sign `(-1)^J`; transposition leaves it invaria
 struct ReggeSquare
     data::NTuple{9, Int} # column major
 end
-function ReggeSquare(j₁, j₂, j₃, m₁, m₂, m₃)
-    return ReggeSquare(
-        (
-            convert(Int, -j₁ + j₂ + j₃), convert(Int, j₁ - m₁), convert(Int, j₁ + m₁),
-            convert(Int, j₁ - j₂ + j₃), convert(Int, j₂ - m₂), convert(Int, j₂ + m₂),
-            convert(Int, j₁ + j₂ - j₃), convert(Int, j₃ - m₃), convert(Int, j₃ + m₃),
-        )
+# entries of the Regge square in column major order
+@inline function _reggeentries(j₁, j₂, j₃, m₁, m₂, m₃)
+    return (
+        -j₁ + j₂ + j₃, j₁ - m₁, j₁ + m₁,
+        j₁ - j₂ + j₃, j₂ - m₂, j₂ + m₂,
+        j₁ + j₂ - j₃, j₃ - m₃, j₃ + m₃,
     )
 end
 Base.@propagate_inbounds Base.getindex(R::ReggeSquare, i::Int, j::Int) = R.data[i + 3 * (j - 1)]
