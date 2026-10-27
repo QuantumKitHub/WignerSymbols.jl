@@ -209,10 +209,10 @@ end
 end
 
 @testset "invalid arguments" begin
-    @test_throws DomainError Δ(1//3, 1, 1)
+    @test_throws DomainError Δ(1 // 3, 1, 1)
     @test_throws DomainError Δ(-1, 1, 1)
     @test_throws DomainError wigner3j(1, 1, 1, 2, -2)
-    @test_throws DomainError wigner3j(1//3, 1, 1, 0, 0)
+    @test_throws DomainError wigner3j(1 // 3, 1, 1, 0, 0)
     @test_throws DomainError wigner6j(-1, 1, 1, 1, 1, 1)
     @test_throws DomainError wigner6j(0.3, 1, 1, 1, 1, 1)
 end

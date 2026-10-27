@@ -280,7 +280,7 @@ divexact!(a::PrimeFactorization, b::PrimeFactorization) = divexact!(a, a, b)
 gcd!(a::PrimeFactorization, b::PrimeFactorization) = gcd!(a, a, b)
 lcm!(a::PrimeFactorization, b::PrimeFactorization) = lcm!(a, a, b)
 
-function Base.:*(a::P, b::P) where {P<:PrimeFactorization}
+function Base.:*(a::P, b::P) where {P <: PrimeFactorization}
     return length(a.powers) >= length(b.powers) ? mul!(copy(a), b) : mul!(copy(b), a)
 end
 
