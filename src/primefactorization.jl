@@ -384,3 +384,10 @@ function sumlist!(list::Vector{<:PrimeFactorization}, ind = 1:length(list))
     end
     return MPZ.mul!(s, _convert!(i, g))
 end
+
+function primebinomial(n::BigInt, k::BigInt)
+    num = copy(primefactorial(n))
+    divexact!(num, primefactorial(k))
+    return divexact!(num, primefactorial(n-k))
+end
+

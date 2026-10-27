@@ -17,8 +17,8 @@ simultaneously. The computation of the Wigner symbols is not in itself multithre
 may be added in the future).
 
 WignerSymbols.jl does no longer store the Wigner 3j and 6j symbols in a `Dict` cache, but
-rather in an `LRU` cache from [LRUCache.jl](https://github.com/JuliaCollections/
-LRUCache.jl). Hence, it no longer stores all Wigner symbols ever computed, but only the
+rather in an `LRU` cache from [LRUCache.jl](https://github.com/JuliaCollections/LRUCache.jl). 
+Hence, it no longer stores all Wigner symbols ever computed, but only the
 most recent ones, and it that sense this is a (softly) breaking release. By default, it
 stores the $10^6$ most recent ones, which is probably equivalent to storing all of them in
 most use cases. This number can be changed via the interface
@@ -52,6 +52,7 @@ While the following function signatures are probably self-explanatory, you can q
 for them in the Julia REPL to get further details.
 *   `wigner3j(T::Type{<:Real} = RationalRoot{BigInt}, j₁, j₂, j₃, m₁, m₂, m₃ = -m₂-m₁) -> ::T`
 *   `wigner6j(T::Type{<:Real} = RationalRoot{BigInt}, j₁, j₂, j₃, j₄, j₅, j₆) -> ::T`
+*   `wigner9j(T::Type{<:Real} = RationalRoot{BigInt}, j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉) -> ::T`
 *   `clebschgordan(T::Type{<:Real} = RationalRoot{BigInt}, j₁, m₁, j₂, m₂, j₃, m₃ = m₁+m₂) -> ::T`
 *   `racahV(T::Type{<:Real} = RationalRoot{BigInt}, j₁, j₂, j₃, m₁, m₂, m₃ = -m₁-m₂) -> ::T`
 *   `racahW(T::Type{<:Real} = RationalRoot{BigInt}, j₁, j₂, J, j₃, J₁₂, J₂₃) -> ::T`
@@ -74,7 +75,7 @@ Largely based on reading the paper (but not the code):
 with some additional modifications to further improve efficiency for large `j` (angular
 momenta quantum numbers).
 
-In particular, 3j and 6j symbols are computed exactly, in the format `√(r) * s` where `r`
+In particular, 3j, 6j, and 9j symbols are computed exactly, in the format `√(r) * s` where `r`
 and `s` are exactly computed as `Rational{BigInt}`, using an intermediate representation
 based on prime number factorization. This exact representation is captured by the
 `RationalRoot` type. For further calculations, these values probably need to be converted
@@ -89,9 +90,8 @@ Also uses ideas from
 
 [2] [J. Rasch and A. C. H. Yu, SIAM Journal on Scientific Compututing 25 (2003), 1416–1428](https://doi.org/10.1137/S1064827503422932)
 
-for caching the computed 3j and 6j symbols.
+for caching the computed 3j and 6j symbols. Wigner 9-j symbols implemented based on 
 
-## Todo
-*   Wigner 9-j symbols, as explained in [1] and based on
+[3] [L. Wei, New formula for 9-j symbols and their direct calculation, Computers in Physics, 12 (1998), 632–634.](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.481.5946&rep=rep1&type=pdf)
 
-    [3] [L. Wei, New formula for 9-j symbols and their direct calculation, Computers in Physics, 12 (1998), 632–634.](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.481.5946&rep=rep1&type=pdf)
+with binomials additionally optimized using the methods described in [1].

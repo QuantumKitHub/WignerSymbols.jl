@@ -1,5 +1,5 @@
 module WignerSymbols
-export δ, Δ, clebschgordan, wigner3j, wigner6j, racahV, racahW, HalfInteger
+export δ, Δ, clebschgordan, wigner3j, wigner6j, wigner9j, racahV, racahW, HalfInteger
 
 using HalfIntegers
 using RationalRoots
@@ -14,15 +14,20 @@ convert(BigInt, primefactorial(401)) # trigger compilation and generate some fix
 
 const Key3j = Tuple{UInt,UInt,UInt,Int,Int}
 const Key6j = NTuple{6,UInt}
+const Key9j = NTuple{9,HalfInteger}
 
 const Wigner3j = LRU{Key3j,Tuple{Rational{BigInt},Rational{BigInt}}}(; maxsize = 10^6)
 const Wigner6j = LRU{Key6j,Tuple{Rational{BigInt},Rational{BigInt}}}(; maxsize = 10^6)
+const Wigner9j = LRU{Key9j,Tuple{Rational{BigInt},Rational{BigInt}}}(; maxsize = 10^6)
 
 function set_buffer3j_size!(; maxsize)
     resize!(Wigner3j; maxsize = maxsize)
 end
 function set_buffer6j_size!(; maxsize)
     resize!(Wigner6j; maxsize = maxsize)
+end
+function set_buffer9j_size!(; maxsize)
+    resize!(Wigner9j; maxsize = maxsize)
 end
 
 # check integerness and correctness of (j,m) angular momentum
@@ -242,6 +247,82 @@ function racahW(T::Type{<:Real}, j₁, j₂, J, j₃, J₁₂, J₂₃)
     end
 end
 
+"""
+    wigner9j(T::Type{<:Real} = RationalRoot{BigInt}, j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉) -> ::T
+
+Compute the value of the Wigner-9j symbol
+⎧ j₁ j₂ j₃ ⎫
+⎨	j₄ j₅ j₆ ⎬
+⎩	j₇ j₈ j₉ ⎭
+as a type `T` real number. By default `T = RationalRoot{BigInt}`.
+
+Returns `zero(T)` if any of the triangle conditions TODO 
+are not satisfied, but throws a `DomainError` if
+the `jᵢ`s are not integer or halfinteger.
+"""
+wigner9j(j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉) = wigner9j(RRBig, j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉)
+function wigner9j(T::Type{<:Real}, j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉) 
+    # check validity of `jᵢ`s
+    for jᵢ in (j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉)
+        (ishalfinteger(jᵢ) && jᵢ >= zero(jᵢ)) || throw(DomainError("invalid jᵢ", jᵢ))
+    end
+    return _wigner9j(T, HalfInteger.((j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉))...)
+end
+
+
+function _wigner9j(T::Type{<:Real}, j₁::HalfInteger, j₂::HalfInteger, j₃::HalfInteger, 
+                                    j₄::HalfInteger, j₅::HalfInteger, j₆::HalfInteger,
+                                    j₇::HalfInteger, j₈::HalfInteger, j₉::HalfInteger)
+  
+    # check triangle conditions 
+    if !(δ(j₁, j₂, j₃) && δ(j₄, j₅, j₆) && δ(j₇, j₈, j₉) && δ(j₁, j₄, j₇) && δ(j₂, j₅, j₈) && δ(j₃, j₆, j₉))
+        return zero(T)
+    end
+   
+    # dictionary lookup by regge symmetries
+    k, m = reorder9j(j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉)
+    if haskey(Wigner9j, k)
+        r, s = Wigner9j[k]
+        return m * _convert(T, s) * convert(T, signedroot(r))
+    end
+
+    # canonicalized entries (m is a restoring sign factor)
+    j₁c, j₂c, j₃c, j₄c, j₅c, j₆c, j₇c, j₈c, j₉c = k
+
+    # order irrelevant: product remains the same
+    n₁, d₁ = Δ²(j₁c, j₂c, j₃c)
+    n₂, d₂ = Δ²(j₄c, j₅c, j₆c)
+    n₃, d₃ = Δ²(j₇c, j₈c, j₉c)
+    n₄, d₄ = Δ²(j₁c, j₄c, j₇c)
+    n₅, d₅ = Δ²(j₂c, j₅c, j₈c)
+    n₆, d₆ = Δ²(j₃c, j₆c, j₉c) 
+
+    snum, rnum = splitsquare(n₁ * n₂ * n₃ * n₄ * n₅ * n₆)
+    sden, rden = splitsquare(d₁ * d₂ * d₃ * d₄ * d₅ * d₆)
+    
+    rnum, rden = divgcd!(rnum, rden) 
+    rr = Base.unsafe_rational(convert(BigInt, rnum), convert(BigInt, rden)) 
+
+    snum, sden = divgcd!(snum, sden)
+    snum2 = compute9jseries(j₁c, j₂c, j₃c, j₄c, j₅c, j₆c, j₇c, j₈c, j₉c)
+    for n = 1:length(sden.powers)
+        p = bigprime(n)
+        while sden.powers[n] > 0
+            q, r = divrem(snum2, p)
+            if iszero(r)
+                snum2 = q
+                sden.powers[n] -= 1
+            else
+                break
+            end
+        end
+    end
+    s = Base.unsafe_rational(convert(BigInt, snum)*snum2, convert(BigInt, sden))
+
+    Wigner9j[(j₁c, j₂c, j₃c, j₄c, j₅c, j₆c, j₇c, j₈c, j₉c)] = (rr, s)
+    return m * _convert(T, s) * convert(T, signedroot(rr))
+end
+
 # COMPUTATIONAL ROUTINES
 #------------------------
 # squared triangle coefficient
@@ -294,6 +375,49 @@ function reorder6j(β₁, β₂, β₃, α₁, α₂, α₃, α₄)
     end
 end
 
+const _perms = [[1, 2, 3], [1, 3, 2], [2, 1, 3], [2, 3, 1], [3, 1, 2], [3, 2, 1]]
+const _perms9j = [(r, c) for r in _perms, c in _perms]
+_permparity(p) = count(i < j && p[i] > p[j] for i in 1:length(p), j in 1:length(p)) % 2
+
+#const _perms9j = [([1, 2, 3], [1, 2, 3]) ([1, 2, 3], [1, 3, 2]) ([1, 2, 3], [2, 1, 3]) ([1, 2, 3], [2, 3, 1]) ([1, 2, 3], [3, 1, 2]) ([1, 2, 3], [3, 2, 1]);
+#                  ([1, 3, 2], [1, 2, 3]) ([1, 3, 2], [1, 3, 2]) ([1, 3, 2], [2, 1, 3]) ([1, 3, 2], [2, 3, 1]) ([1, 3, 2], [3, 1, 2]) ([1, 3, 2], [3, 2, 1]);
+#                  ([2, 1, 3], [1, 2, 3]) ([2, 1, 3], [1, 3, 2]) ([2, 1, 3], [2, 1, 3]) ([2, 1, 3], [2, 3, 1]) ([2, 1, 3], [3, 1, 2]) ([2, 1, 3], [3, 2, 1]);
+#                  ([2, 3, 1], [1, 2, 3]) ([2, 3, 1], [1, 3, 2]) ([2, 3, 1], [2, 1, 3]) ([2, 3, 1], [2, 3, 1]) ([2, 3, 1], [3, 1, 2]) ([2, 3, 1], [3, 2, 1]);
+#                  ([3, 1, 2], [1, 2, 3]) ([3, 1, 2], [1, 3, 2]) ([3, 1, 2], [2, 1, 3]) ([3, 1, 2], [2, 3, 1]) ([3, 1, 2], [3, 1, 2]) ([3, 1, 2], [3, 2, 1]);
+#                  ([3, 2, 1], [1, 2, 3]) ([3, 2, 1], [1, 3, 2]) ([3, 2, 1], [2, 1, 3]) ([3, 2, 1], [2, 3, 1]) ([3, 2, 1], [3, 1, 2]) ([3, 2, 1], [3, 2, 1])]
+
+# reorder parameters determining the 9j symbol to canonical (lexicographic) order with regge factor
+function reorder9j(j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉)
+
+    J = [j₁ j₂ j₃; j₄ j₅ j₆; j₇ j₈ j₉]
+
+    k = (j₁, j₂, j₃, j₄, j₅, j₆, j₇, j₈, j₉)
+    m = 1
+
+    rg = (-1)^sum(k)
+
+    for p in _perms9j
+        JJ = J[p...]
+        kk = Tuple(reshape(JJ, 9))
+        kkT = Tuple(reshape(JJ', 9))
+
+        s = iseven(_permparity(p[1]) + _permparity(p[2])) ? 1 : rg
+
+        if kk < kkT
+            if kk < k
+                k = kk
+                m = s
+            end
+        else # kk > kkT
+            if kkT < k                
+                k = kkT
+                m = s
+            end
+        end        
+    end
+    return k, m
+end
+
 # compute the sum appearing in the 3j symbol
 function compute3jseries(β₁, β₂, β₃, α₁, α₂)
     krange = max(α₁, α₂, zero(α₁)):min(β₁, β₂, β₃)
@@ -312,7 +436,6 @@ function compute3jseries(β₁, β₂, β₃, α₁, α₂)
     end
     den = commondenominator!(nums, dens)
     totalnum = sumlist!(nums)
-    totalden = convert(BigInt, den)
     for n = 1:length(den.powers)
         p = bigprime(n)
         while den.powers[n] > 0
@@ -365,13 +488,84 @@ function compute6jseries(β₁, β₂, β₃, α₁, α₂, α₃, α₄)
     return Base.unsafe_rational(totalnum, totalden)
 end
 
+# compute the sum appearing in the 9j symbol
+function compute9jseries(a, b, c, d, e, f, g, h, j)
+    I1 = max(abs(h - d), abs(b - f), abs(a - j))
+    I2 = min(h + d, b + f, a + j)
+    krange = I1:I2
+ 
+    s = sum(krange) do k
+        p = iseven(BigInt(2k)) ? big(2k + 1) : -big(2k + 1)
+
+        b₁ = let (m₁, m₂, m₃, m₄, m₅, m₆) = (a, b, c, f, j, k)     
+            α₁ = convert(BigInt, m₁ + m₅ - m₆)
+            α₂ = convert(BigInt, m₁ - m₅ + m₆)
+            α₃ = convert(BigInt, -m₁ + m₅ + m₆)
+            β₁ = convert(BigInt, m₁ + m₅ + m₆)
+            β₂ = convert(BigInt, m₂ + m₄ + m₆)
+            β₃ = convert(BigInt, m₃ + m₄ + m₅)
+            β₀ = convert(BigInt, m₁ + m₂ + m₃)
+            wei9jbracket(α₁, α₂, α₃, β₁, β₂, β₃, β₀)
+        end
+        
+        b₂ = let (m₁, m₂, m₃, m₄, m₅, m₆) = (f, d, e, h, b, k)
+            α₁ = convert(BigInt, m₁ + m₅ - m₆)
+            α₂ = convert(BigInt, m₁ - m₅ + m₆)
+            α₃ = convert(BigInt, -m₁ + m₅ + m₆)
+            β₁ = convert(BigInt, m₁ + m₅ + m₆)
+            β₂ = convert(BigInt, m₂ + m₄ + m₆)
+            β₃ = convert(BigInt, m₃ + m₄ + m₅)
+            β₀ = convert(BigInt, m₁ + m₂ + m₃)
+            wei9jbracket(α₁, α₂, α₃, β₁, β₂, β₃, β₀)
+        end
+
+        b₃ = let (m₁, m₂, m₃, m₄, m₅, m₆) = (h, j, g, a, d, k) 
+            α₁ = convert(BigInt, m₁ + m₅ - m₆)
+            α₂ = convert(BigInt, m₁ - m₅ + m₆)
+            α₃ = convert(BigInt, -m₁ + m₅ + m₆)
+            β₁ = convert(BigInt, m₁ + m₅ + m₆)
+            β₂ = convert(BigInt, m₂ + m₄ + m₆)
+            β₃ = convert(BigInt, m₃ + m₄ + m₅)
+            β₀ = convert(BigInt, m₁ + m₂ + m₃)
+            wei9jbracket(α₁, α₂, α₃, β₁, β₂, β₃, β₀)
+        end
+        
+        p * b₁ * b₂ * b₃
+    end
+
+    return convert(BigInt, s)
+end
+
+# Wei square bracket terms appearing the 9j series
+function wei9jbracket(α₁::BigInt, α₂::BigInt, α₃::BigInt, β₁::BigInt, β₂::BigInt, β₃::BigInt, β₀::BigInt) 
+    p = max(β₁, β₂, β₃, β₀)
+    q = min(α₁ + β₂, α₂ + β₃, α₃ + β₀)
+    lrange = p:q
+    T = PrimeFactorization{eltype(eltype(factorialtable))}
+
+    terms = Vector{T}(undef, length(lrange))
+    for (j, l) in enumerate(lrange)
+        b₁ = iseven(l) ? copy(primebinomial(big(l + 1), l - β₁)) : neg!(copy(primebinomial(big(l + 1), l - β₁)))
+        b₂ = primebinomial(α₁, l - β₂)
+        b₃ = primebinomial(α₂, l - β₃)
+        b₄ = primebinomial(α₃, l - β₀)
+
+        terms[j] = mul!(mul!(mul!(b₁, b₂), b₃), b₄)
+    end
+    total = sumlist!(terms)
+    return total
+end
+
 function _precompile_()
     @assert precompile(wigner3j, (Type{Float64}, Int, Int, Int, Int, Int, Int))
     @assert precompile(wigner6j, (Type{Float64}, Int, Int, Int, Int, Int, Int))
+    @assert precompile(wigner9j, (Type{Float64}, Int, Int, Int, Int, Int, Int, Int, Int, Int))
     @assert precompile(wigner3j, (Type{BigFloat}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}))
     @assert precompile(wigner6j, (Type{BigFloat}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}))
+    @assert precompile(wigner9j, (Type{BigFloat}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}))
     @assert precompile(wigner3j, (Type{RRBig}, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt))
     @assert precompile(wigner6j, (Type{RRBig}, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt))
+    @assert precompile(wigner9j, (Type{RRBig}, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt))
 end
 _precompile_()
 
