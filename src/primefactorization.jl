@@ -1,5 +1,5 @@
 using Primes: isprime
-import Base.divgcd
+using Base.GMP.MPZ
 
 const primetable = GrowingList([2, 3]; sizehint = 1024)
 const factortable = GrowingList([UInt8[], UInt8[1], UInt8[0,1]]; sizehint = 4096)
@@ -142,15 +142,8 @@ Base.one(::Type{PrimeFactorization{U}}) where {U<:Unsigned} =
 Base.zero(::Type{PrimeFactorization{U}}) where {U<:Unsigned} =
     PrimeFactorization{U}(Vector{U}(), zero(Int8))
 
-one!(c::PrimeFactorization) = (c.sign = one(Int8); empty!(c.powers); return c)
 zero!(c::PrimeFactorization) = (c.sign = zero(Int8); empty!(c.powers); return c)
 
-Base.promote_rule(P::Type{<:PrimeFactorization},::Type{<:Integer}) = P
-Base.promote_rule(::Type{<:PrimeFactorization},::Type{BigInt}) = BigInt
-Base.promote_rule(::Type{PrimeFactorization{U1}},
-                    ::Type{PrimeFactorization{U2}}) where {U1<:Unsigned, U2<:Unsigned} = PrimeFactorization{promote_type(U1, U2)}
-
-Base.convert(P::Type{<:PrimeFactorization}, n::Integer) = convert(P, primefactor(n))
 function _convert!(x::BigInt, a::PrimeFactorization)
     MPZ.set!(x, bigone)
     for (n, e) in enumerate(a.powers)
@@ -161,29 +154,9 @@ function _convert!(x::BigInt, a::PrimeFactorization)
     return a.sign < 0 ? MPZ.neg!(x) : x
 end
 Base.convert(::Type{BigInt}, a::PrimeFactorization) = _convert!(one(BigInt), a)
-Base.convert(::Type{PrimeFactorization{U}}, a::PrimeFactorization{U}) where {U<:Unsigned} =
-    a
-Base.convert(::Type{PrimeFactorization{U}}, a::PrimeFactorization) where {U<:Unsigned} =
-    PrimeFactorization{U}(convert(Vector{U}, a.powers), a.sign)
 
 Base.:(==)(a::PrimeFactorization, b::PrimeFactorization) =
     a.powers == b.powers && a.sign == b.sign
-function Base.:<(a::PrimeFactorization, b::PrimeFactorization)
-    if a.sign != b.sign
-        return a.sign < b.sign
-    elseif a.sign < 0
-        return <(-b, -a)
-    else
-        ag, bg = divgcd(a, b)
-        ag == bg && return false
-        if length(ag.powers) <= length(bg.powers)
-                all(k->ag.powers[k]<bg.powers[k], 1:length(ag.powers))
-            return true
-        else
-            return convert(BigInt, ag) < convert(BigInt, bg)
-        end
-    end
-end
 
 # Methods for PrimeFactorization: only fast multiplication, and lcm and gcd.
 # Addition and subtraction will require conversion to BigInt
@@ -307,34 +280,9 @@ divexact!(a::PrimeFactorization, b::PrimeFactorization) = divexact!(a, a, b)
 gcd!(a::PrimeFactorization, b::PrimeFactorization) = gcd!(a, a, b)
 lcm!(a::PrimeFactorization, b::PrimeFactorization) = lcm!(a, a, b)
 
-Base.:-(a::PrimeFactorization) = neg!(copy(a))
-function Base.:*(a::PrimeFactorization, b::PrimeFactorization)
-    P = promote_type(typeof(a), typeof(b))
-    if length(a.powers) >= length(b.powers)
-        return typeof(a) == P ? mul!(copy(a), b) : mul!(convert(P, a), b)
-    else
-        return typeof(b) == P ? mul!(copy(b), a) : mul!(convert(P, b), a)
-    end
+function Base.:*(a::P, b::P) where {P<:PrimeFactorization}
+    return length(a.powers) >= length(b.powers) ? mul!(copy(a), b) : mul!(copy(b), a)
 end
-function Base.lcm(a::PrimeFactorization, b::PrimeFactorization)
-    P = promote_type(typeof(a), typeof(b))
-    if length(a.powers) >= length(b.powers)
-        return typeof(a) == P ? lcm!(copy(a), b) : lcm!(convert(P, a), b)
-    else
-        return typeof(b) == P ? lcm!(copy(b), a) : lcm!(convert(P, b), a)
-    end
-end
-function Base.gcd(a::PrimeFactorization, b::PrimeFactorization)
-    P = promote_type(typeof(a), typeof(b))
-    if length(a.powers) <= length(b.powers)
-        return typeof(a) == P ? lcm!(copy(a), b) : lcm!(convert(P, a), b)
-    else
-        return typeof(b) == P ? lcm!(copy(b), a) : lcm!(convert(P, b), a)
-    end
-end
-Base.divgcd(a::PrimeFactorization, b::PrimeFactorization) = divgcd!(copy(a), copy(b))
-# no promotion necessary, should be smaller than a
-divexact(a::PrimeFactorization, b::PrimeFactorization) = divexact!(copy(a), b)
 
 # split `a::PrimeFactorization` into a square `s` and a remainder `r`, such that
 # `a = s^2 * r` and the powers in the prime factorization of `r` are zero or one

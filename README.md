@@ -23,8 +23,8 @@ most recent ones, and it that sense this is a (softly) breaking release. By defa
 stores the $10^6$ most recent ones, which is probably equivalent to storing all of them in
 most use cases. This number can be changed via the interface
 ```julia
-WignerSymbols.set_buffer3j_size(; maxsize = ...)
-WignerSymbols.set_buffer6j_size(; maxsize = ...)
+WignerSymbols.set_buffer3j_size!(; maxsize = ...)
+WignerSymbols.set_buffer6j_size!(; maxsize = ...)
 ```
 Thus note that there are separate cache buffers for 3j symbols (or Clebsch-Gordan
 coefficients, or Racah V coefficients) and 6j symbols (or Racah W coefficients).
