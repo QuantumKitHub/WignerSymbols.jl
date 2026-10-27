@@ -280,10 +280,6 @@ divexact!(a::PrimeFactorization, b::PrimeFactorization) = divexact!(a, a, b)
 gcd!(a::PrimeFactorization, b::PrimeFactorization) = gcd!(a, a, b)
 lcm!(a::PrimeFactorization, b::PrimeFactorization) = lcm!(a, a, b)
 
-function Base.:*(a::P, b::P) where {P <: PrimeFactorization}
-    return length(a.powers) >= length(b.powers) ? mul!(copy(a), b) : mul!(copy(b), a)
-end
-
 # split `a::PrimeFactorization` into a square `s` and a remainder `r`, such that
 # `a = s^2 * r` and the powers in the prime factorization of `r` are zero or one
 function splitsquare(a::PrimeFactorization)

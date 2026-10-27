@@ -220,3 +220,77 @@ end
     @test_throws DomainError wigner6j(-1, 1, 1, 1, 1, 1)
     @test_throws DomainError wigner6j(0.3, 1, 1, 1, 1, 1)
 end
+
+# test symmetries and caching
+#-----------------------------
+# exact value as a correctly rounded Float64
+exactfloat(x) = setprecision(() -> Float64(convert(BigFloat, x)), BigFloat, 512)
+
+@testset "wigner3j: 72 symmetries of the Regge square" begin
+    perms = ((1, 2, 3), (2, 3, 1), (3, 1, 2), (2, 1, 3), (1, 3, 2), (3, 2, 1)) # even, then odd
+    for j1 in 0:(1 // 2):3, j2 in 0:(1 // 2):3, j3 in abs(j1 - j2):min(j1 + j2, 3), m1 in -j1:j1, m2 in -j2:j2
+        m3 = -m1 - m2
+        abs(m3) <= j3 || continue
+        J = Int(j1 + j2 + j3)
+        R = [-j1 + j2 + j3 j1 - j2 + j3 j1 + j2 - j3; j1 - m1 j2 - m2 j3 - m3; j1 + m1 j2 + m2 j3 + m3]
+        x = wigner3j(j1, j2, j3, m1, m2, m3)
+        x64 = wigner3j(Float64, j1, j2, j3, m1, m2, m3)
+        @test x64 === exactfloat(x) + 0.0
+        for (kp, p) in enumerate(perms), (kq, q) in enumerate(perms), t in (false, true)
+            R′ = R[collect(p), collect(q)]
+            t && (R′ = permutedims(R′))
+            j′ = ntuple(k -> (R′[2, k] + R′[3, k]) // 2, 3)
+            m′ = ntuple(k -> (R′[3, k] - R′[2, k]) // 2, 3)
+            sgn = isodd(J) && ((kp > 3) ⊻ (kq > 3)) ? -1 : 1
+            @test wigner3j(j′..., m′...) == sgn * x
+            @test wigner3j(Float64, j′..., m′...) === sgn * x64 + 0.0
+        end
+    end
+end
+
+@testset "wigner6j: 144 symmetries" begin
+    jlist = 0:(1 // 2):2
+    for j1 in jlist, j2 in jlist, j3 in jlist, j4 in jlist, j5 in jlist, j6 in jlist
+        (δ(j1, j2, j3) && δ(j1, j6, j5) && δ(j2, j4, j6) && δ(j3, j4, j5)) || continue
+        x = wigner6j(j1, j2, j3, j4, j5, j6)
+        x64 = wigner6j(Float64, j1, j2, j3, j4, j5, j6)
+        @test x64 === exactfloat(x) + 0.0
+        # Regge symmetry
+        s = (j2 + j3 + j5 + j6) // 2
+        @test wigner6j(j1, s - j2, s - j3, j4, s - j5, s - j6) == x
+        # column permutations and interchange of upper and lower arguments in two columns
+        @test wigner6j(j2, j1, j3, j5, j4, j6) == x
+        @test wigner6j(j1, j3, j2, j4, j6, j5) == x
+        @test wigner6j(j4, j5, j3, j1, j2, j6) == x
+        @test wigner6j(Float64, j4, j2, j6, j1, j5, j3) === x64
+    end
+end
+
+@testset "caches" begin
+    W = WignerSymbols
+    jmax3 = (@atomic W.Wigner3jFloat.table.maxleading) // 2
+    jmax6 = (@atomic W.Wigner6jFloat.table.maxleading) // 2
+    # Float64 requests do not fill the exact caches
+    empty!(W.Wigner3j)
+    empty!(W.Wigner6j)
+    x = wigner3j(Float64, 7, 15 // 2, 19 // 2, -3, 1 // 2)
+    y = wigner6j(Float64, 7, 15 // 2, 19 // 2, 4, 11 // 2, 13 // 2)
+    @test isempty(W.Wigner3j) && isempty(W.Wigner6j)
+    @test !iszero(x) && !iszero(y)
+    @test x === exactfloat(wigner3j(7, 15 // 2, 19 // 2, -3, 1 // 2))
+    @test y === exactfloat(wigner6j(7, 15 // 2, 19 // 2, 4, 11 // 2, 13 // 2))
+    @test length(W.Wigner3j) == 1 && length(W.Wigner6j) == 1
+    # symbols outside the dense table are stored in the LRU cache, also after resizing
+    for jmax in (1, 5, jmax3)
+        W.set_table3j_size!(; jmax = jmax)
+        W.set_table6j_size!(; jmax = min(jmax, jmax6))
+        @test wigner3j(Float64, 7, 15 // 2, 19 // 2, -3, 1 // 2) === x
+        @test wigner6j(Float64, 7, 15 // 2, 19 // 2, 4, 11 // 2, 13 // 2) === y
+        @test wigner3j(Float64, 201, 300, 150, 5, -7) ===
+            exactfloat(wigner3j(201, 300, 150, 5, -7)) + 0.0
+        @test wigner6j(Float64, 201, 300, 150, 100, 250, 220) ===
+            exactfloat(wigner6j(201, 300, 150, 100, 250, 220)) + 0.0
+    end
+    @test length(W.Wigner3jFloat.lru) > 0 && length(W.Wigner6jFloat.lru) > 0
+    @test_throws DomainError wigner6j(1, 2, 3, 4, 5, 1 // 3)
+end
