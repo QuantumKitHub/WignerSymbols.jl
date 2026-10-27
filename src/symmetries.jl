@@ -126,6 +126,16 @@ end
     return (k[1] + α₄, k[2] + α₄, β₃, β₃ - k[6], β₃ - k[5], β₃ - k[4], α₄)
 end
 
+# triangle coefficients
+#-----------------------
+"""
+    KeyΔ = NTuple{3,Int}
+
+Canonical form of the triangle coefficient `Δ(j₁, j₂, j₃)`: the tuple of `j₁+j₂-j₃`,
+`j₁-j₂+j₃` and `-j₁+j₂+j₃`, sorted in descending order.
+"""
+const KeyΔ = NTuple{3, Int}
+
 # sorting networks, in descending order
 @inline _minmax(a, b) = a < b ? (b, a) : (a, b)
 @inline function _sort((a, b, c)::NTuple{3})

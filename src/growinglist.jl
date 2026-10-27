@@ -85,7 +85,7 @@ mutable struct GrowingList{T} <: AbstractVector{T}
         while next !== nothing
             i += 1
             val, state = next
-            _unsafe_getindex(first, i, val, ceil(Int, (i-1)*growthfactor))
+            _unsafe_get!(first, i, val, ceil(Int, (growthfactor - 1) * (i - 1)))
             next = iterate(iter, state)
         end
         return new{T}(first, Atomic{Int}(i), growthfactor, SpinLock())

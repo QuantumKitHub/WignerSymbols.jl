@@ -73,12 +73,7 @@ FloatCache{N}(maxleading::Int, maxsize::Int) where {N} =
         end
         return v
     else
-        v = get(c.lru, key, NaN)
-        if isnan(v)
-            v = f(key)
-            c.lru[key] = v
-        end
-        return v
+        return get!(() -> f(key), c.lru, key)
     end
 end
 

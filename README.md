@@ -110,6 +110,8 @@ WignerSymbols.set_table6j_size!(; jmax = ...) # requires up to 8 * binomial(2jma
 ```
 Other symbols, as well as exact values (requested as `RationalRoot{BigInt}`, `BigFloat`,
 ...), are stored in LRU caches, holding the $10^6$ most recently used symbols by default.
+Triangle coefficients `Δ(j₁, j₂, j₃)` requested as `Float64` or `Float32` are cached in
+the same way, in a dense table for `jᵢ ≤ 40` and an LRU cache otherwise.
 
 ## Todo
 *   Wigner 9-j symbols, as explained in [1] and based on

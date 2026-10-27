@@ -322,3 +322,26 @@ end
     @test_throws DomainError wigner6j(-1, 1, 1, 1, 1, 1)
     @test_throws DomainError wigner6j(0.3, 1, 1, 1, 1, 1)
 end
+
+@testset "triangle coefficient: rounding and arguments" begin
+    for (j1, j2, j3) in ((1, 1, 1), (5 // 2, 3, 7 // 2), (40, 31, 20), (150, 201, 300))
+        x = Δ(j1, j2, j3)
+        @test Δ(Float64, j1, j2, j3) === exactfloat(x)
+        @test Δ(Float32, j1, j2, j3) === Float32(exactfloat(x))
+        @test Δ(Float64, float.((j1, j2, j3))...) === Δ(Float64, j1, j2, j3)
+    end
+    @test Δ(Float64, 1, 1, 3) === 0.0
+    @test Δ(1, 1 // 2, 1) == 0
+    @test_throws DomainError Δ(1 // 3, 1, 1)
+    @test_throws DomainError Δ(-1, 1, 1)
+end
+
+@testset "GrowingList" begin
+    l = WignerSymbols.GrowingList(collect(1:10); sizehint = 4)
+    @test length(l) == 10
+    @test collect(l) == 1:10
+    @test get!(l, 11, 11) == 11
+    @test get!(() -> 12, l, 12) == 12
+    @test l[12] == 12
+    @test_throws ArgumentError get!(l, 14, 14)
+end

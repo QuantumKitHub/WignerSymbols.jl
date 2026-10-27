@@ -4,6 +4,7 @@ export δ, Δ, clebschgordan, wigner3j, wigner6j, racahV, racahW, HalfInteger
 using HalfIntegers
 using RationalRoots
 using LRUCache
+using PrecompileTools: @setup_workload, @compile_workload
 const RRBig = RationalRoot{BigInt}
 
 include("growinglist.jl")
@@ -17,6 +18,7 @@ const Wigner3j = LRU{Key3j,Tuple{Rational{BigInt},Rational{BigInt}}}(; maxsize =
 const Wigner6j = LRU{Key6j,Tuple{Rational{BigInt},Rational{BigInt}}}(; maxsize = 10^6)
 const Wigner3jFloat = FloatCache{5}(40, 10^6) # dense table for all jᵢ ≤ 20
 const Wigner6jFloat = FloatCache{6}(30, 10^6) # dense table for all jᵢ ≤ 15
+const ΔFloat = FloatCache{3}(80, 10^5) # dense table for all jᵢ ≤ 40
 
 _exactcache(::Key3j) = Wigner3j
 _exactcache(::Key6j) = Wigner6j
@@ -74,6 +76,7 @@ end
 
 # check integerness and correctness of (j,m) angular momentum
 ϵ(j, m) = (abs(m) <= j) & ishalfinteger(j) & isinteger(j - m) & isinteger(j + m)
+ϵ(j::HalfInt, m::HalfInt) = (abs(m) <= j) & isinteger(j - m)
 
 # conversion to `HalfInt`, or `nothing` if `x` is not a (half)integer; unlike `HalfInt(x)`,
 # this does not throw, and it avoids rational arithmetic for `Rational` arguments
@@ -86,6 +89,13 @@ end
     return nothing
 end
 @inline _halfint(x::Real) = ishalfinteger(x) ? HalfInt(x) : nothing
+# conversion to `HalfInt`, calling `err()` if `x` is not a (half)integer; `err` should
+# never return, such that the result is inferred as `HalfInt`
+@inline function _halfint(x, err)
+    h = _halfint(x)
+    isnothing(h) && err()
+    return h
+end
 # for arguments that are known to be valid
 @inline _validhalfint(x) = _halfint(x)::HalfInt
 
@@ -110,15 +120,20 @@ throws a `DomainError` if the `jᵢ`s are not (half)integer
 """
 Δ(j₁, j₂, j₃) = Δ(RRBig, j₁, j₂, j₃)
 function Δ(T::Type{<:Real}, j₁, j₂, j₃)
+    err() = _throwΔ(j₁, j₂, j₃)
+    j₁′, j₂′, j₃′ = _halfint(j₁, err), _halfint(j₂, err), _halfint(j₃, err)
+    min(j₁′, j₂′, j₃′) >= 0 || err()
+    δ(j₁′, j₂′, j₃′) || return zero(T)
+    key = _sort(convert.(Int, (j₁′ + j₂′ - j₃′, j₁′ - j₂′ + j₃′, -j₁′ + j₂′ + j₃′)))
+    return _value(T, key)
+end
+
+@noinline function _throwΔ(j₁, j₂, j₃)
     for jᵢ in (j₁, j₂, j₃)
         (ishalfinteger(jᵢ) && jᵢ >= zero(jᵢ)) || throw(DomainError(jᵢ, "invalid jᵢ"))
     end
-    if !δ(j₁, j₂, j₃)
-        return zero(T)
-    end
-    n, d = Δ²(j₁, j₂, j₃)
-    r = Base.unsafe_rational(n, d)
-    return convert(T, signedroot(RationalRoot{BigInt}, r))
+    # not reached, see `_throw3j`
+    throw(ArgumentError("arguments do not fit in `HalfInt`"))
 end
 
 """
@@ -135,23 +150,19 @@ throws a `DomainError` if the `jᵢ`s and `mᵢ`s are not (half)integer or `abs(
 wigner3j(j₁, j₂, j₃, m₁, m₂) = wigner3j(RRBig, j₁, j₂, j₃, m₁, m₂)
 wigner3j(j₁, j₂, j₃, m₁, m₂, m₃) = wigner3j(RRBig, j₁, j₂, j₃, m₁, m₂, m₃)
 function wigner3j(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂)
-    j₁′, j₂′, j₃′, m₁′, m₂′ = _halfint(j₁), _halfint(j₂), _halfint(j₃), _halfint(m₁), _halfint(m₂)
-    if isnothing(j₁′) || isnothing(j₂′) || isnothing(j₃′) || isnothing(m₁′) || isnothing(m₂′)
-        _throw3j(j₁, j₂, j₃, m₁, m₂, -m₁ - m₂)
-    end
-    m₃′ = -m₁′ - m₂′
-    ϵ(j₁′, m₁′) & ϵ(j₂′, m₂′) & ϵ(j₃′, m₃′) || _throw3j(j₁, j₂, j₃, m₁, m₂, -m₁ - m₂)
-    return _wigner3j(T, j₁′, j₂′, j₃′, m₁′, m₂′, m₃′)
+    err() = _throw3j(j₁, j₂, j₃, m₁, m₂, -m₁ - m₂)
+    m₁′, m₂′ = _halfint(m₁, err), _halfint(m₂, err)
+    return _wigner3j(
+        T, err, _halfint(j₁, err), _halfint(j₂, err), _halfint(j₃, err),
+        m₁′, m₂′, -m₁′ - m₂′
+    )
 end
 function wigner3j(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂, m₃)
-    j₁′, j₂′, j₃′ = _halfint(j₁), _halfint(j₂), _halfint(j₃)
-    m₁′, m₂′, m₃′ = _halfint(m₁), _halfint(m₂), _halfint(m₃)
-    if isnothing(j₁′) || isnothing(j₂′) || isnothing(j₃′) ||
-            isnothing(m₁′) || isnothing(m₂′) || isnothing(m₃′)
-        _throw3j(j₁, j₂, j₃, m₁, m₂, m₃)
-    end
-    ϵ(j₁′, m₁′) & ϵ(j₂′, m₂′) & ϵ(j₃′, m₃′) || _throw3j(j₁, j₂, j₃, m₁, m₂, m₃)
-    return _wigner3j(T, j₁′, j₂′, j₃′, m₁′, m₂′, m₃′)
+    err() = _throw3j(j₁, j₂, j₃, m₁, m₂, m₃)
+    return _wigner3j(
+        T, err, _halfint(j₁, err), _halfint(j₂, err), _halfint(j₃, err),
+        _halfint(m₁, err), _halfint(m₂, err), _halfint(m₃, err)
+    )
 end
 
 @noinline function _throw3j(j₁, j₂, j₃, m₁, m₂, m₃)
@@ -163,11 +174,12 @@ end
     throw(ArgumentError("arguments do not fit in `HalfInt`"))
 end
 
-# for valid (jᵢ, mᵢ)
+# `err()` throws the appropriate error for the original arguments
 @inline function _wigner3j(
-        T::Type{<:Real}, j₁::HalfInt, j₂::HalfInt, j₃::HalfInt,
+        T::Type{<:Real}, err, j₁::HalfInt, j₂::HalfInt, j₃::HalfInt,
         m₁::HalfInt, m₂::HalfInt, m₃::HalfInt
     )
+    ϵ(j₁, m₁) & ϵ(j₂, m₂) & ϵ(j₃, m₃) || err()
     iszero(m₁ + m₂ + m₃) || return zero(T)
     R = _reggesquare(j₁, j₂, j₃, m₁, m₂, m₃)
     _isvalid(R) || return zero(T) # triangle condition
@@ -185,14 +197,16 @@ function _value(T::Type{<:CachedFloat}, key, flip::Bool = false)
     end
     return convert(T, (flip & !iszero(v)) ? -v : v)
 end
+# triangle coefficients are not stored exactly
+function _value(T::Type{<:CachedFloat}, key::KeyΔ)
+    return convert(T, _get!(key -> _float64(_exact(key)...), ΔFloat, key))
+end
+function _value(T::Type{<:Real}, key::KeyΔ)
+    r, s = _exact(key)
+    return convert(T, signedroot(RRBig, r))
+end
 function _value(T::Type{<:Real}, key, flip::Bool = false)
-    cache = _exactcache(key)
-    rs = get(cache, key, nothing)
-    if isnothing(rs)
-        rs = _exact(key)
-        cache[key] = rs
-    end
-    r, s = rs
+    r, s = get!(() -> _exact(key), _exactcache(key), key)
     return convert(T, flip ? -s : s) * convert(T, signedroot(r))
 end
 
@@ -237,9 +251,13 @@ as a type `T` real number. By default, `T = RationalRoot{BigInt}` and `m₃ = -m
 Returns `zero(T)` if the triangle condition `δ(j₁, j₂, j₃)` is not satisfied, but
 throws a `DomainError` if the `jᵢ`s and `mᵢ`s are not (half)integer or `abs(mᵢ) > jᵢ`.
 """
-racahV(j₁, j₂, j₃, m₁, m₂, m₃...) = racahV(RRBig, j₁, j₂, j₃, m₁, m₂, m₃...)
-function racahV(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂, m₃...)
-    s = wigner3j(T, j₁, j₂, j₃, m₁, m₂, m₃...)
+racahV(j₁, j₂, j₃, m₁, m₂) = racahV(RRBig, j₁, j₂, j₃, m₁, m₂)
+racahV(j₁, j₂, j₃, m₁, m₂, m₃) = racahV(RRBig, j₁, j₂, j₃, m₁, m₂, m₃)
+racahV(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂) =
+    _racahV(T, wigner3j(T, j₁, j₂, j₃, m₁, m₂), j₁, j₂, j₃)
+racahV(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂, m₃) =
+    _racahV(T, wigner3j(T, j₁, j₂, j₃, m₁, m₂, m₃), j₁, j₂, j₃)
+function _racahV(T::Type{<:Real}, s, j₁, j₂, j₃)
     iszero(s) && return s
     # arguments are valid if s is nonzero
     return isodd(convert(Int, -_validhalfint(j₁) + _validhalfint(j₂) + _validhalfint(j₃))) ? -s : s
@@ -259,12 +277,10 @@ the `jᵢ`s are not integer or halfinteger.
 """
 wigner6j(j₁, j₂, j₃, j₄, j₅, j₆) = wigner6j(RRBig, j₁, j₂, j₃, j₄, j₅, j₆)
 function wigner6j(T::Type{<:Real}, j₁, j₂, j₃, j₄, j₅, j₆)
-    j₁′, j₂′, j₃′, j₄′, j₅′, j₆′ = _halfint(j₁), _halfint(j₂), _halfint(j₃), _halfint(j₄), _halfint(j₅), _halfint(j₆)
-    if isnothing(j₁′) || isnothing(j₂′) || isnothing(j₃′) ||
-            isnothing(j₄′) || isnothing(j₅′) || isnothing(j₆′)
-        _throw6j(j₁, j₂, j₃, j₄, j₅, j₆)
-    end
-    min(j₁′, j₂′, j₃′, j₄′, j₅′, j₆′) >= 0 || _throw6j(j₁, j₂, j₃, j₄, j₅, j₆)
+    err() = _throw6j(j₁, j₂, j₃, j₄, j₅, j₆)
+    j₁′, j₂′, j₃′ = _halfint(j₁, err), _halfint(j₂, err), _halfint(j₃, err)
+    j₄′, j₅′, j₆′ = _halfint(j₄, err), _halfint(j₅, err), _halfint(j₆, err)
+    min(j₁′, j₂′, j₃′, j₄′, j₅′, j₆′) >= 0 || err()
     return _wigner6j(T, j₁′, j₂′, j₃′, j₄′, j₅′, j₆′)
 end
 
@@ -309,16 +325,14 @@ end
 
 # COMPUTATIONAL ROUTINES
 #------------------------
-# squared triangle coefficient
-function Δ²(j₁, j₂, j₃)
-    # also checks the triangle conditions by converting to unsigned integer:
-    n1 = copy(primefactorial( convert(UInt, + j₁ + j₂ - j₃) ))
-    n2 = primefactorial( convert(UInt, + j₁ - j₂ + j₃) )
-    n3 = primefactorial( convert(UInt, - j₁ + j₂ + j₃) )
-    num = mul!(mul!(n1, n2), n3)
-    den = copy(primefactorial( convert(UInt, j₁ + j₂ + j₃ + 1) ))
-    # result
-    return divgcd!(num, den)
+# exact value `(r, 1)` of the triangle coefficient, such that it equals `√r`
+function _exact(key::KeyΔ)
+    a, b, c = key
+    num = mul!(mul!(copy(primefactorial(a)), primefactorial(b)), primefactorial(c))
+    den = copy(primefactorial(a + b + c + 1))
+    num, den = divgcd!(num, den)
+    r = Base.unsafe_rational(convert(BigInt, num), convert(BigInt, den))
+    return r, one(r)
 end
 
 # exact value `(r, s)` of the canonical 3j symbol, such that the 3j symbol equals `s * √r`
@@ -331,7 +345,8 @@ function _exact(key::Key3j)
     # R = ⎢ J-X-B  B      X     ⎥
     #     ⎣ T      J-L-B  J-S-X ⎦
     R = (J - S - L, J - X - B, T, L, B, J - L - B, S, X, J - S - X)
-    # Racah formula in terms of the Regge square
+    # Racah formula in terms of the Regge square; since L ≥ X ≥ T ≥ B ≥ S, we have
+    # α₁, α₂ ≤ 0 and β₁ = S ≤ β₂, β₃, such that the summation range is 0:S
     β₁, β₂, β₃ = R[7], R[2], R[6]
     α₁, α₂ = R[7] - R[3], R[7] - R[5]
 
@@ -378,9 +393,30 @@ function _exact(key::Key6j)
     return r, s
 end
 
+# sum of the terms `nums[i] / dens[i]` as a reduced `Rational{BigInt}`
+function _sumseries!(nums, dens)
+    den = commondenominator!(nums, dens)
+    totalnum = sumlist!(nums)
+    # cancel common prime factors
+    for n in 1:length(den.powers)
+        p = bigprime(n)
+        while den.powers[n] > 0
+            q, r = divrem(totalnum, p)
+            if iszero(r)
+                totalnum = q
+                den.powers[n] -= 1
+            else
+                break
+            end
+        end
+    end
+    return Base.unsafe_rational(totalnum, convert(BigInt, den))
+end
+
 # compute the sum appearing in the 3j symbol
 function compute3jseries(β₁, β₂, β₃, α₁, α₂)
-    krange = max(α₁, α₂, zero(α₁)):min(β₁, β₂, β₃)
+    # for the canonical 3j symbol, α₁, α₂ ≤ 0 and β₁ ≤ β₂, β₃, see `_exact(::Key3j)`
+    krange = 0:β₁
     T = PrimeFactorization{eltype(eltype(factorialtable))}
 
     nums = Vector{T}(undef, length(krange))
@@ -394,22 +430,7 @@ function compute3jseries(β₁, β₂, β₃, α₁, α₂)
                                         primefactorial(β₃-k))
         nums[i], dens[i] = num, den
     end
-    den = commondenominator!(nums, dens)
-    totalnum = sumlist!(nums)
-    for n = 1:length(den.powers)
-        p = bigprime(n)
-        while den.powers[n] > 0
-            q, r = divrem(totalnum, p)
-            if iszero(r)
-                totalnum = q
-                den.powers[n] -= 1
-            else
-                break
-            end
-        end
-    end
-    totalden = convert(BigInt, den)
-    return Base.unsafe_rational(totalnum, totalden)
+    return _sumseries!(nums, dens)
 end
 
 # compute the sum appearing in the 6j symbol
@@ -430,32 +451,32 @@ function compute6jseries(β₁, β₂, β₃, α₁, α₂, α₃, α₄)
                                         primefactorial(β₃-k))
         nums[i], dens[i] = divgcd!(num, den)
     end
-    den = commondenominator!(nums, dens)
-    totalnum = sumlist!(nums)
-    for n = 1:length(den.powers)
-        p = bigprime(n)
-        while den.powers[n] > 0
-            q, r = divrem(totalnum, p)
-            if iszero(r)
-                totalnum = q
-                den.powers[n] -= 1
-            else
-                break
-            end
-        end
-    end
-    totalden = convert(BigInt, den)
-    return Base.unsafe_rational(totalnum, totalden)
+    return _sumseries!(nums, dens)
 end
 
-function _precompile_()
-    @assert precompile(wigner3j, (Type{Float64}, Int, Int, Int, Int, Int, Int))
-    @assert precompile(wigner6j, (Type{Float64}, Int, Int, Int, Int, Int, Int))
-    @assert precompile(wigner3j, (Type{BigFloat}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}))
-    @assert precompile(wigner6j, (Type{BigFloat}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}, Rational{Int}))
-    @assert precompile(wigner3j, (Type{RRBig}, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt))
-    @assert precompile(wigner6j, (Type{RRBig}, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt, HalfInt))
+@setup_workload begin
+    @compile_workload begin
+        for T in (Float64, RRBig)
+            wigner3j(T, 1, 1 // 2, 1 // 2, 0, 1 // 2)
+            wigner3j(T, 1, 1 // 2, 1 // 2, 0, 1 // 2, -1 // 2)
+            wigner3j(T, 1, 1, 1, 0, 0)
+            wigner3j(T, 1, 1, 1, 0, 0, 0)
+            clebschgordan(T, 1 // 2, 1 // 2, 1 // 2, -1 // 2, 1)
+            clebschgordan(T, 1 // 2, 1 // 2, 1 // 2, -1 // 2, 1, 0)
+            wigner6j(T, 1, 1, 1, 1, 1, 1)
+            wigner6j(T, 1 // 2, 1 // 2, 1, 1 // 2, 1 // 2, 1)
+            racahW(T, 1, 1, 1, 1, 1, 1)
+            Δ(T, 1, 1, 1)
+        end
+    end
+    # do not store the values computed by the workload in the package image
+    empty!(Wigner3j)
+    empty!(Wigner6j)
+    for c in (Wigner3jFloat, Wigner6jFloat, ΔFloat)
+        empty!(c.lru)
+        @atomic c.table.data = Float64[]
+    end
 end
-_precompile_()
+
 
 end # module
