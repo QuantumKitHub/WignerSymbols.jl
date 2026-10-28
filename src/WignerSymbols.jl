@@ -15,8 +15,8 @@ include("cache.jl")
 
 const Wigner3j = LRU{Key3j,Tuple{Rational{BigInt},Rational{BigInt}}}(; maxsize = 10^6)
 const Wigner6j = LRU{Key6j,Tuple{Rational{BigInt},Rational{BigInt}}}(; maxsize = 10^6)
-const Wigner3jFloat = FloatCache{Key3j, 5}(40, 10^6) # dense table for all jᵢ ≤ 20
-const Wigner6jFloat = FloatCache{Key6j, 6}(30, 10^6) # dense table for all jᵢ ≤ 15
+const Wigner3jFloat = FloatCache{5}(40, 10^6) # dense table for all jᵢ ≤ 20
+const Wigner6jFloat = FloatCache{6}(30, 10^6) # dense table for all jᵢ ≤ 15
 
 _exactcache(::Key3j) = Wigner3j
 _exactcache(::Key6j) = Wigner6j
@@ -169,18 +169,12 @@ end
         m₁::HalfInt, m₂::HalfInt, m₃::HalfInt
     )
     iszero(m₁ + m₂ + m₃) || return zero(T)
-    # the triangle condition holds iff all entries of the Regge square are non-negative integers
-    entries = _reggeentries(j₁, j₂, j₃, m₁, m₂, m₃)
-    valid = true
-    for r in entries
-        valid &= (r >= 0) & isinteger(r)
-    end
-    valid || return zero(T)
-    # canonical form under all 72 symmetries, using the Regge square
-    R = ReggeSquare(map(r -> convert(Int, r), entries))
+    R = _reggesquare(j₁, j₂, j₃, m₁, m₂, m₃)
+    _isvalid(R) || return zero(T) # triangle condition
+    # canonical form under all 72 symmetries
     key, odd = canonicalize(R)
-    # odd permutations of rows or columns of R yield a sign (-1)^J
-    return _value(T, key, odd & isodd(sumJ(R)))
+    # odd permutations of rows or columns of the Regge square yield a sign (-1)^J
+    return _value(T, key, odd & isodd(convert(Int, j₁ + j₂ + j₃)))
 end
 
 # value of the Wigner symbol with canonical key `key`, with an additional sign if `flip`
@@ -291,7 +285,7 @@ end
     # check triangle conditions
     δ(j₁, j₂, j₃) & δ(j₁, j₆, j₅) & δ(j₂, j₄, j₆) & δ(j₃, j₄, j₅) || return zero(T)
     # canonical form under all 144 symmetries
-    return _value(T, Key6j(j₁, j₂, j₃, j₄, j₅, j₆))
+    return _value(T, key6j(j₁, j₂, j₃, j₄, j₅, j₆))
 end
 
 """
@@ -329,7 +323,7 @@ end
 
 # exact value `(r, s)` of the canonical 3j symbol, such that the 3j symbol equals `s * √r`
 function _exact(key::Key3j)
-    (; L, X, T, B, S) = key
+    L, X, T, B, S = key
     J = S + X + L + B - T
     # Regge square of the canonical 3j symbol, with columns 1 and 3 interchanged
     # (yielding a sign (-1)^J), such that the series has S+1 terms:
@@ -363,7 +357,7 @@ end
 
 # exact value `(r, s)` of the canonical 6j symbol, such that the 6j symbol equals `s * √r`
 function _exact(key::Key6j)
-    (; β₁, β₂, β₃, α₁, α₂, α₃, α₄) = key
+    β₁, β₂, β₃, α₁, α₂, α₃, α₄ = _sums(key)
     # product of the four squared triangle coefficients
     num = one(PrimeFactorization{UInt32})
     for β in (β₁, β₂, β₃), α in (α₁, α₂, α₃, α₄)

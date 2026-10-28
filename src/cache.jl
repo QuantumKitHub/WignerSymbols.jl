@@ -45,26 +45,24 @@ function _grow!(t::DenseTable{N}, k₁::Int) where {N}
 end
 
 """
-    FloatCache{K,N}
+    FloatCache{N}
 
-Cache of `Float64` values for keys of type `K`, which are mapped onto non-increasing
-`NTuple{N,Int}` via `_combinatorialkey`: a `DenseTable` for keys with small leading entry,
-and an `LRU` cache for the remaining keys.
+Cache of `Float64` values for non-increasing `NTuple{N,Int}` keys: a `DenseTable` for keys
+with small leading entry, and an `LRU` cache for the remaining keys.
 """
-struct FloatCache{K, N}
+struct FloatCache{N}
     table::DenseTable{N}
-    lru::LRU{K, Float64}
+    lru::LRU{NTuple{N, Int}, Float64}
 end
-FloatCache{K, N}(maxleading::Int, maxsize::Int) where {K, N} =
-    FloatCache{K, N}(DenseTable{N}(maxleading), LRU{K, Float64}(; maxsize = maxsize))
+FloatCache{N}(maxleading::Int, maxsize::Int) where {N} =
+    FloatCache{N}(DenseTable{N}(maxleading), LRU{NTuple{N, Int}, Float64}(; maxsize = maxsize))
 
 # get the value for `key`, or compute it as `f(key)` and store it
-@inline function _get!(f, c::FloatCache{K, N}, key::K) where {K, N}
-    ckey = _combinatorialkey(key)::NTuple{N, Int}
-    k₁ = ckey[1]
+@inline function _get!(f, c::FloatCache{N}, key::NTuple{N, Int}) where {N}
+    k₁ = key[1]
     if k₁ <= @atomic c.table.maxleading
         data = @atomic c.table.data
-        i = _tableindex(ckey)
+        i = _tableindex(key)
         if i > length(data)
             data = _grow!(c.table, k₁)
         end

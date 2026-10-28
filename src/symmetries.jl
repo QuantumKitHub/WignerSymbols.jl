@@ -1,45 +1,49 @@
 # Canonical forms of Wigner symbols under their full symmetry groups, following
 # J. Rasch and A. C. H. Yu, SIAM J. Sci. Comput. 25, 1416 (2003).
 #
-# Both canonical forms can be represented as non-increasing tuples of non-negative
-# integers, which are mapped onto a dense linear index using the combinatorial number
-# system, see `_tableindex`.
+# Both canonical forms are represented as non-increasing tuples of non-negative integers,
+# which are mapped onto a dense linear index using the combinatorial number system, see
+# `_tableindex`.
 
 # 3j symbols
 #------------
 """
-    ReggeSquare(data::NTuple{9,Int})
+    _reggesquare(j₁, j₂, j₃, m₁, m₂, m₃) -> NTuple{9}
 
-Regge square of a 3j symbol with arguments `(j₁, j₂, j₃, m₁, m₂, m₃)`, i.e. the 3×3 matrix
+Regge square of a 3j symbol with arguments `(j₁, j₂, j₃, m₁, m₂, m₃)` in column major
+order, i.e. the 3×3 matrix
 ```
 ⎡ -j₁+j₂+j₃  j₁-j₂+j₃  j₁+j₂-j₃ ⎤
 ⎢  j₁-m₁      j₂-m₂     j₃-m₃   ⎥
 ⎣  j₁+m₁      j₂+m₂     j₃+m₃   ⎦
 ```
-All entries are non-negative integers, and all row and column sums equal
-`J = j₁ + j₂ + j₃`. The 72 symmetries of the 3j symbol correspond to row and column
-permutations and transposition of the Regge square. Under an odd permutation of rows or
+For valid arguments, all entries are non-negative integers (see `_isvalid`), and all row
+and column sums equal `J = j₁ + j₂ + j₃`. The 72 symmetries of the 3j symbol correspond
+to row and column permutations and transposition of the Regge square. Under an odd permutation of rows or
 columns, the 3j symbol picks up a sign `(-1)^J`; transposition leaves it invariant.
 """
-struct ReggeSquare
-    data::NTuple{9, Int} # column major
-end
-# entries of the Regge square in column major order
-@inline function _reggeentries(j₁, j₂, j₃, m₁, m₂, m₃)
+@inline function _reggesquare(j₁, j₂, j₃, m₁, m₂, m₃)
     return (
         -j₁ + j₂ + j₃, j₁ - m₁, j₁ + m₁,
         j₁ - j₂ + j₃, j₂ - m₂, j₂ + m₂,
         j₁ + j₂ - j₃, j₃ - m₃, j₃ + m₃,
     )
 end
-Base.@propagate_inbounds Base.getindex(R::ReggeSquare, i::Int, j::Int) = R.data[i + 3 * (j - 1)]
-sumJ(R::ReggeSquare) = R[1, 1] + R[1, 2] + R[1, 3]
+
+# the triangle conditions and `|mᵢ| ≤ jᵢ` hold iff all entries are non-negative integers
+@inline function _isvalid(R::NTuple{9})
+    valid = true
+    for r in R
+        valid &= (r >= 0) & isinteger(r)
+    end
+    return valid
+end
 
 """
-    Key3j(L, X, T, B, S)
+    Key3j = NTuple{5,Int}
 
-Canonical form of a 3j symbol under its 72 symmetries, following Rasch and Yu. It
-corresponds to the Regge square
+Canonical form `(L, X, T, B, S)` of a 3j symbol under its 72 symmetries, following Rasch
+and Yu. It corresponds to the Regge square
 ```
 ⎡ S      L      J-S-L ⎤
 ⎢ X      B      J-X-B ⎥
@@ -48,34 +52,28 @@ corresponds to the Regge square
 with `L` the largest and `S` the smallest entry, `L ≥ X ≥ T ≥ B ≥ S`, and
 `J = S + X + L + B - T`.
 """
-struct Key3j
-    L::Int
-    X::Int
-    T::Int
-    B::Int
-    S::Int
-end
-_combinatorialkey(k::Key3j) = (k.L, k.X, k.T, k.B, k.S)
+const Key3j = NTuple{5, Int}
 
 """
-    canonicalize(R::ReggeSquare) -> (key::Key3j, odd::Bool)
+    canonicalize(R::NTuple{9}) -> (key::Key3j, odd::Bool)
 
-Bring the Regge square to the canonical form, and return whether this required an odd
+Bring a valid Regge square to the canonical form, and return whether this required an odd
 permutation of rows and columns.
 """
-@inline function canonicalize(R::ReggeSquare)
+@inline function canonicalize(R::NTuple{9})
+    @inline r(i, j) = R[i + 3 * (j - 1)]
     # locate largest entry
-    imax, jmax, L = 1, 1, R[1, 1]
+    imax, jmax, L = 1, 1, r(1, 1)
     for j in 1:3, i in 1:3
-        if R[i, j] > L
-            imax, jmax, L = i, j, R[i, j]
+        if r(i, j) > L
+            imax, jmax, L = i, j, r(i, j)
         end
     end
     # the smallest entry is in the row or in the column of L; if not in the row: transpose
-    rowmin = min(R[imax, 1], R[imax, 2], R[imax, 3])
-    colmin = min(R[1, jmax], R[2, jmax], R[3, jmax])
+    rowmin = min(r(imax, 1), r(imax, 2), r(imax, 3))
+    colmin = min(r(1, jmax), r(2, jmax), r(3, jmax))
     transposed = colmin < rowmin
-    @inline e(i, j) = transposed ? R[j, i] : R[i, j]
+    @inline e(i, j) = transposed ? r(j, i) : r(i, j)
     i₀, j₀ = transposed ? (jmax, imax) : (imax, jmax)
 
     # row permutation (p₁, p₂, p₃) with p₁ = i₀: odd iff i₀ == 2
@@ -96,55 +94,47 @@ permutation of rows and columns.
         p₂, p₃ = p₃, p₂
         odd = !odd
     end
-    return Key3j(L, e(p₂, q₁), e(p₃, q₃), e(p₂, q₂), e(p₁, q₁)), odd
+    key = convert.(Int, (L, e(p₂, q₁), e(p₃, q₃), e(p₂, q₂), e(p₁, q₁)))
+    return key, odd
 end
 
 # 6j symbols
 #------------
 """
-    Key6j(j₁, j₂, j₃, j₄, j₅, j₆)
+    Key6j = NTuple{6,Int}
 
 Canonical form of a 6j symbol under its 144 symmetries, which correspond to arbitrary
 permutations of the sums `αᵢ` of the four triads and of the sums `βⱼ` of the three
-quadrangles. It stores these sums sorted as `β₁ ≥ β₂ ≥ β₃ ≥ α₁ ≥ α₂ ≥ α₃ ≥ α₄`.
-
-Since `∑ᵢ αᵢ = ∑ⱼ βⱼ`, the 6j symbol is fully determined by the non-increasing tuple
-`(β₁-α₄, β₂-α₄, β₃-α₄, β₃-α₃, β₃-α₂, β₃-α₁)`, and every non-increasing tuple of
-non-negative integers corresponds to exactly one canonical 6j symbol.
+quadrangles. Sorting these sums as `β₁ ≥ β₂ ≥ β₃ ≥ α₁ ≥ α₂ ≥ α₃ ≥ α₄`, and using that
+`∑ᵢ αᵢ = ∑ⱼ βⱼ`, the 6j symbol is fully determined by the non-increasing tuple
+`(β₁-α₄, β₂-α₄, β₃-α₄, β₃-α₃, β₃-α₂, β₃-α₁)`. Every non-increasing tuple of non-negative
+integers corresponds to exactly one canonical 6j symbol.
 """
-struct Key6j
-    β₁::Int
-    β₂::Int
-    β₃::Int
-    α₁::Int
-    α₂::Int
-    α₃::Int
-    α₄::Int
-end
-@inline function Key6j(j₁, j₂, j₃, j₄, j₅, j₆)
-    α₁, α₂, α₃, α₄ = _sort4(
-        convert(Int, j₁ + j₂ + j₃), convert(Int, j₁ + j₆ + j₅),
-        convert(Int, j₂ + j₄ + j₆), convert(Int, j₃ + j₄ + j₅)
+const Key6j = NTuple{6, Int}
+
+@inline function key6j(j₁, j₂, j₃, j₄, j₅, j₆)
+    α₁, α₂, α₃, α₄ = _sort(
+        convert.(Int, (j₁ + j₂ + j₃, j₁ + j₆ + j₅, j₂ + j₄ + j₆, j₃ + j₄ + j₅))
     )
-    β₁, β₂, β₃ = _sort3(
-        convert(Int, j₁ + j₂ + j₄ + j₅), convert(Int, j₁ + j₃ + j₄ + j₆),
-        convert(Int, j₂ + j₃ + j₅ + j₆)
-    )
-    return Key6j(β₁, β₂, β₃, α₁, α₂, α₃, α₄)
+    β₁, β₂, β₃ = _sort(convert.(Int, (j₁ + j₂ + j₄ + j₅, j₁ + j₃ + j₄ + j₆, j₂ + j₃ + j₅ + j₆)))
+    return (β₁ - α₄, β₂ - α₄, β₃ - α₄, β₃ - α₃, β₃ - α₂, β₃ - α₁)
 end
-function _combinatorialkey(k::Key6j)
-    return (k.β₁ - k.α₄, k.β₂ - k.α₄, k.β₃ - k.α₄, k.β₃ - k.α₃, k.β₃ - k.α₂, k.β₃ - k.α₁)
+# triad and quadrangle sums `(β₁, β₂, β₃, α₁, α₂, α₃, α₄)` of the canonical 6j symbol
+@inline function _sums(k::Key6j)
+    α₄ = k[1] + k[2] - 2 * k[3] + k[4] + k[5] + k[6] # from ∑ᵢ αᵢ = ∑ⱼ βⱼ
+    β₃ = k[3] + α₄
+    return (k[1] + α₄, k[2] + α₄, β₃, β₃ - k[6], β₃ - k[5], β₃ - k[4], α₄)
 end
 
 # sorting networks, in descending order
 @inline _minmax(a, b) = a < b ? (b, a) : (a, b)
-@inline function _sort3(a, b, c)
+@inline function _sort((a, b, c)::NTuple{3})
     a, b = _minmax(a, b)
     b, c = _minmax(b, c)
     a, b = _minmax(a, b)
     return a, b, c
 end
-@inline function _sort4(a, b, c, d)
+@inline function _sort((a, b, c, d)::NTuple{4})
     a, b = _minmax(a, b)
     c, d = _minmax(c, d)
     a, c = _minmax(a, c)
