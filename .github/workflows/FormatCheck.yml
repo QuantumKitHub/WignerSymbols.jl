@@ -1,0 +1,13 @@
+name: 'Format'
+
+on:
+  pull_request:
+    paths: ['**/*.jl']
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  formatcheck:
+    uses: "QuantumKitHub/QuantumKitHubActions/.github/workflows/FormatCheck.yml@main"

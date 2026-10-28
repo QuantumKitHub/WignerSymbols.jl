@@ -8,7 +8,6 @@ const RRBig = RationalRoot{BigInt}
 import RationalRoots: _convert
 
 include("growinglist.jl")
-include("bigint.jl") # additional GMP BigInt functionality not wrapped in Base.GMP.MPZ
 include("primefactorization.jl")
 convert(BigInt, primefactorial(401)) # trigger compilation and generate some fixed data
 
@@ -50,7 +49,7 @@ throws a `DomainError` if the `jᵢ`s are not (half)integer
 Δ(j₁, j₂, j₃) = Δ(RRBig, j₁, j₂, j₃)
 function Δ(T::Type{<:Real}, j₁, j₂, j₃)
     for jᵢ in (j₁, j₂, j₃)
-        (ishalfinteger(jᵢ) && jᵢ >= zero(jᵢ)) || throw(DomainError("invalid jᵢ", jᵢ))
+        (ishalfinteger(jᵢ) && jᵢ >= zero(jᵢ)) || throw(DomainError(jᵢ, "invalid jᵢ"))
     end
     if !δ(j₁, j₂, j₃)
         return zero(T)
@@ -100,8 +99,9 @@ function _wigner3j(T::Type{<:Real}, j₁::HalfInteger, j₂::HalfInteger, j₃::
     sgn = isodd(α₁ - α₂) ? -sgn : sgn
 
     # dictionary lookup or compute
-    if haskey(Wigner3j, (β₁, β₂, β₃, α₁, α₂))
-        r, s = Wigner3j[(β₁, β₂, β₃, α₁, α₂)]
+    rs = get(Wigner3j, (β₁, β₂, β₃, α₁, α₂), nothing)
+    if !isnothing(rs)
+        r, s = rs
     else
         s1n, s1d = Δ²(j₁, j₂, j₃)
         s2n = prod(map(primefactorial, (β₂, β₁ - α₁, β₁ - α₂, β₃, β₃ - α₁, β₂ - α₂)))
@@ -169,7 +169,7 @@ wigner6j(j₁, j₂, j₃, j₄, j₅, j₆) = wigner6j(RRBig, j₁, j₂, j₃,
 function wigner6j(T::Type{<:Real}, j₁, j₂, j₃, j₄, j₅, j₆)
     # check validity of `jᵢ`s
     for jᵢ in (j₁, j₂, j₃, j₄, j₅, j₆)
-        (ishalfinteger(jᵢ) && jᵢ >= zero(jᵢ)) || throw(DomainError("invalid jᵢ", jᵢ))
+        (ishalfinteger(jᵢ) && jᵢ >= zero(jᵢ)) || throw(DomainError(jᵢ, "invalid jᵢ"))
     end
     return _wigner6j(T, HalfInteger.((j₁, j₂, j₃, j₄, j₅, j₆))...)
 end
@@ -199,8 +199,9 @@ function _wigner6j(T::Type{<:Real}, j₁::HalfInteger, j₂::HalfInteger, j₃::
     (β₁, β₂, β₃, α₁, α₂, α₃, α₄) = reorder6j(β₁, β₂, β₃, α₁, α₂, α₃, α₄)
 
     # dictionary lookup or compute
-    if haskey(Wigner6j, (β₁, β₂, β₃, α₁, α₂, α₃))
-        r, s = Wigner6j[(β₁, β₂, β₃, α₁, α₂, α₃)]
+    rs = get(Wigner6j, (β₁, β₂, β₃, α₁, α₂, α₃), nothing)
+    if !isnothing(rs)
+        r, s = rs
     else
         # order irrelevant: product remains the same under action of reorder6j
         n₁, d₁ = Δ²(α̂₁...)
@@ -302,7 +303,7 @@ function compute3jseries(β₁, β₂, β₃, α₁, α₂)
     nums = Vector{T}(undef, length(krange))
     dens = Vector{T}(undef, length(krange))
     for (i, k) in enumerate(krange)
-        num = iseven(k) ? one(T) : -one(T)
+        num = iseven(k) ? one(T) : neg!(one(T))
         den = copy(primefactorial(k))
         den = mul!(mul!(den, primefactorial(k-α₁)), primefactorial(k-α₂))
         den = mul!(mul!(mul!(den, primefactorial(β₁-k)),
@@ -312,7 +313,6 @@ function compute3jseries(β₁, β₂, β₃, α₁, α₂)
     end
     den = commondenominator!(nums, dens)
     totalnum = sumlist!(nums)
-    totalden = convert(BigInt, den)
     for n = 1:length(den.powers)
         p = bigprime(n)
         while den.powers[n] > 0

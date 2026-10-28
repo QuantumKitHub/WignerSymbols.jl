@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - 'master'
+    tags: '*'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+jobs:
+  tests:
+    name: "Tests"
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 'min' # minimal supported version
+          - '1' # latest stable release
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    uses: "QuantumKitHub/QuantumKitHubActions/.github/workflows/Tests.yml@main"
+    with:
+      julia-version: "${{ matrix.version }}"
+      os: "${{ matrix.os }}"
+      nthreads: 2
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
