@@ -87,7 +87,7 @@ end
 end
 @inline _halfint(x::Real) = ishalfinteger(x) ? HalfInt(x) : nothing
 # for arguments that are known to be valid
-@inline _halfint!(x) = _halfint(x)::HalfInt
+@inline _validhalfint(x) = _halfint(x)::HalfInt
 
 # check triangle condition
 """
@@ -211,13 +211,13 @@ function clebschgordan(T::Type{<:Real}, j₁, m₁, j₂, m₂, j₃)
     s = wigner3j(T, j₁, j₂, j₃, m₁, m₂)
     iszero(s) && return s
     # arguments are valid if s is nonzero
-    return _clebschgordan(T, s, _halfint!(j₁), _halfint!(j₂), _halfint!(j₃), _halfint!(m₁) + _halfint!(m₂))
+    return _clebschgordan(T, s, _validhalfint(j₁), _validhalfint(j₂), _validhalfint(j₃), _validhalfint(m₁) + _validhalfint(m₂))
 end
 function clebschgordan(T::Type{<:Real}, j₁, m₁, j₂, m₂, j₃, m₃)
     s = wigner3j(T, j₁, j₂, j₃, m₁, m₂, -m₃)
     iszero(s) && return s
     # arguments are valid if s is nonzero
-    return _clebschgordan(T, s, _halfint!(j₁), _halfint!(j₂), _halfint!(j₃), _halfint!(m₃))
+    return _clebschgordan(T, s, _validhalfint(j₁), _validhalfint(j₂), _validhalfint(j₃), _validhalfint(m₃))
 end
 function _clebschgordan(T::Type{<:Real}, s, j₁::HalfInt, j₂::HalfInt, j₃::HalfInt, m₃::HalfInt)
     s *= _sqrt(T, convert(Int, 2 * j₃ + 1))
@@ -242,7 +242,7 @@ function racahV(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂, m₃...)
     s = wigner3j(T, j₁, j₂, j₃, m₁, m₂, m₃...)
     iszero(s) && return s
     # arguments are valid if s is nonzero
-    return isodd(convert(Int, -_halfint!(j₁) + _halfint!(j₂) + _halfint!(j₃))) ? -s : s
+    return isodd(convert(Int, -_validhalfint(j₁) + _validhalfint(j₂) + _validhalfint(j₃))) ? -s : s
 end
 
 """
@@ -304,7 +304,7 @@ function racahW(T::Type{<:Real}, j₁, j₂, J, j₃, J₁₂, J₂₃)
     s = wigner6j(T, j₁, j₂, J₁₂, j₃, J, J₂₃)
     iszero(s) && return s
     # arguments are valid if s is nonzero
-    return isodd(convert(Int, _halfint!(j₁) + _halfint!(j₂) + _halfint!(j₃) + _halfint!(J))) ? -s : s
+    return isodd(convert(Int, _validhalfint(j₁) + _validhalfint(j₂) + _validhalfint(j₃) + _validhalfint(J))) ? -s : s
 end
 
 # COMPUTATIONAL ROUTINES
