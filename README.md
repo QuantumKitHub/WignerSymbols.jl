@@ -91,6 +91,28 @@ Also uses ideas from
 
 for caching the computed 3j and 6j symbols.
 
+## Caching
+Computed 3j and 6j symbols are cached, using a canonical form under their full symmetry
+groups, i.e. including the Regge symmetries (72 symmetries for 3j symbols, 144 for 6j
+symbols), following the storage scheme of J. Rasch and A. C. H. Yu [2]
+([doi:10.1137/S1064827503422932](https://doi.org/10.1137/S1064827503422932)).
+
+Symbols requested as `Float64` or `Float32` are cached as correctly rounded
+`Float64` values, separately from the exact values, so that repeated requests do not
+require any conversion from the exact representation, and the exact values do not need to
+be stored. For small angular momenta, these values are stored in a dense table indexed by
+the canonical form, which is allocated incrementally upon first use. By default, this table
+holds all 3j symbols with `jᵢ ≤ 20` (at most 9.3 MiB) and all 6j symbols with `jᵢ ≤ 15`
+(at most 15 MiB). This can be changed via
+```julia
+WignerSymbols.set_table3j_size!(; jmax = ...) # requires up to 8 * binomial(2jmax + 5, 5) bytes
+WignerSymbols.set_table6j_size!(; jmax = ...) # requires up to 8 * binomial(2jmax + 6, 6) bytes
+```
+Other symbols, as well as exact values (requested as `RationalRoot{BigInt}`, `BigFloat`,
+...), are stored in LRU caches, holding the $10^6$ most recently used symbols by default.
+Triangle coefficients `Δ(j₁, j₂, j₃)` requested as `Float64` or `Float32` are cached in
+the same way, in a dense table for `jᵢ ≤ 40` and an LRU cache otherwise.
+
 ## Todo
 *   Wigner 9-j symbols, as explained in [1] and based on
 
