@@ -5,27 +5,89 @@ using HalfIntegers
 using RationalRoots
 using LRUCache
 const RRBig = RationalRoot{BigInt}
-import RationalRoots: _convert
 
 include("growinglist.jl")
 include("primefactorization.jl")
 convert(BigInt, primefactorial(401)) # trigger compilation and generate some fixed data
 
-const Key3j = Tuple{UInt,UInt,UInt,Int,Int}
-const Key6j = NTuple{6,UInt}
+include("symmetries.jl")
+include("cache.jl")
 
 const Wigner3j = LRU{Key3j,Tuple{Rational{BigInt},Rational{BigInt}}}(; maxsize = 10^6)
 const Wigner6j = LRU{Key6j,Tuple{Rational{BigInt},Rational{BigInt}}}(; maxsize = 10^6)
+const Wigner3jFloat = FloatCache{5}(40, 10^6) # dense table for all jᵢ ≤ 20
+const Wigner6jFloat = FloatCache{6}(30, 10^6) # dense table for all jᵢ ≤ 15
 
+_exactcache(::Key3j) = Wigner3j
+_exactcache(::Key6j) = Wigner6j
+_floatcache(::Key3j) = Wigner3jFloat
+_floatcache(::Key6j) = Wigner6jFloat
+
+# types for which values are retrieved from the `Float64` caches
+const CachedFloat = Union{Float32, Float64}
+
+"""
+    WignerSymbols.set_buffer3j_size!(; maxsize)
+
+Set the maximal number of 3j symbols that are stored in the LRU caches, both for exact
+values and for `Float64` values that are not stored in the dense table.
+"""
 function set_buffer3j_size!(; maxsize)
     resize!(Wigner3j; maxsize = maxsize)
+    return resize!(Wigner3jFloat.lru; maxsize = maxsize)
 end
+"""
+    WignerSymbols.set_buffer6j_size!(; maxsize)
+
+Set the maximal number of 6j symbols that are stored in the LRU caches, both for exact
+values and for `Float64` values that are not stored in the dense table.
+"""
 function set_buffer6j_size!(; maxsize)
     resize!(Wigner6j; maxsize = maxsize)
+    return resize!(Wigner6jFloat.lru; maxsize = maxsize)
+end
+
+"""
+    WignerSymbols.set_table3j_size!(; jmax)
+
+Store all 3j symbols with `jᵢ ≤ jmax` that are requested as floating point numbers in a
+dense table, which is allocated incrementally upon first use and requires up to
+`8 * binomial(2jmax + 5, 5)` bytes of memory. Other 3j symbols are stored in an LRU cache.
+Memory that was already allocated for the table is not freed when decreasing `jmax`.
+"""
+function set_table3j_size!(; jmax)
+    @atomic Wigner3jFloat.table.maxleading = convert(Int, 2 * jmax)
+    return jmax
+end
+"""
+    WignerSymbols.set_table6j_size!(; jmax)
+
+Store all 6j symbols with `jᵢ ≤ jmax` that are requested as floating point numbers in a
+dense table, which is allocated incrementally upon first use and requires up to
+`8 * binomial(2jmax + 6, 6)` bytes of memory. Other 6j symbols are stored in an LRU cache.
+Memory that was already allocated for the table is not freed when decreasing `jmax`.
+"""
+function set_table6j_size!(; jmax)
+    @atomic Wigner6jFloat.table.maxleading = convert(Int, 2 * jmax)
+    return jmax
 end
 
 # check integerness and correctness of (j,m) angular momentum
-ϵ(j, m) = (abs(m) <= j && ishalfinteger(j) && isinteger(j-m) && isinteger(j+m))
+ϵ(j, m) = (abs(m) <= j) & ishalfinteger(j) & isinteger(j - m) & isinteger(j + m)
+
+# conversion to `HalfInt`, or `nothing` if `x` is not a (half)integer; unlike `HalfInt(x)`,
+# this does not throw, and it avoids rational arithmetic for `Rational` arguments
+@inline _halfint(x::Integer) = HalfInt(x)
+@inline _halfint(x::HalfInteger) = HalfInt(x)
+@inline function _halfint(x::Rational)
+    d = denominator(x)
+    d == 1 && return half(HalfInt, 2 * convert(Int, numerator(x)))
+    d == 2 && return half(HalfInt, convert(Int, numerator(x)))
+    return nothing
+end
+@inline _halfint(x::Real) = ishalfinteger(x) ? HalfInt(x) : nothing
+# for arguments that are known to be valid
+@inline _validhalfint(x) = _halfint(x)::HalfInt
 
 # check triangle condition
 """
@@ -33,7 +95,7 @@ end
 
 Checks the triangle conditions `j₃ <= j₁ + j₂`, `j₁ <= j₂ + j₃` and `j₂ <= j₃ + j₁`.
 """
-δ(j₁, j₂, j₃) = (j₃ <= j₁ + j₂) && (j₁ <= j₂ + j₃) && (j₂ <= j₃ + j₁) && isinteger(j₁+j₂+j₃)
+δ(j₁, j₂, j₃) = (j₃ <= j₁ + j₂) & (j₁ <= j₂ + j₃) & (j₂ <= j₃ + j₁) & isinteger(j₁ + j₂ + j₃)
 
 # triangle coefficient
 """
@@ -70,52 +132,68 @@ as a type `T` real number. By default, `T = RationalRoot{BigInt}` and `m₃ = -m
 Returns `zero(T)` if the triangle condition `δ(j₁, j₂, j₃)` is not satisfied, but
 throws a `DomainError` if the `jᵢ`s and `mᵢ`s are not (half)integer or `abs(mᵢ) > jᵢ`.
 """
-wigner3j(j₁, j₂, j₃, m₁, m₂, m₃ = -m₁-m₂) = wigner3j(RRBig, j₁, j₂, j₃, m₁, m₂, m₃)
-function wigner3j(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂, m₃ = -m₁-m₂)
-    # check angular momenta
-    for (jᵢ,mᵢ) in ((j₁, m₁), (j₂, m₂), (j₃, m₃))
-        ϵ(jᵢ, mᵢ) || throw(DomainError((jᵢ, mᵢ), "invalid combination (jᵢ, mᵢ)"))
+wigner3j(j₁, j₂, j₃, m₁, m₂) = wigner3j(RRBig, j₁, j₂, j₃, m₁, m₂)
+wigner3j(j₁, j₂, j₃, m₁, m₂, m₃) = wigner3j(RRBig, j₁, j₂, j₃, m₁, m₂, m₃)
+function wigner3j(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂)
+    j₁′, j₂′, j₃′, m₁′, m₂′ = _halfint(j₁), _halfint(j₂), _halfint(j₃), _halfint(m₁), _halfint(m₂)
+    if isnothing(j₁′) || isnothing(j₂′) || isnothing(j₃′) || isnothing(m₁′) || isnothing(m₂′)
+        _throw3j(j₁, j₂, j₃, m₁, m₂, -m₁ - m₂)
     end
-    return _wigner3j(T, HalfInteger.((j₁, j₂, j₃, m₁, m₂, m₃))...)
+    m₃′ = -m₁′ - m₂′
+    ϵ(j₁′, m₁′) & ϵ(j₂′, m₂′) & ϵ(j₃′, m₃′) || _throw3j(j₁, j₂, j₃, m₁, m₂, -m₁ - m₂)
+    return _wigner3j(T, j₁′, j₂′, j₃′, m₁′, m₂′, m₃′)
+end
+function wigner3j(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂, m₃)
+    j₁′, j₂′, j₃′ = _halfint(j₁), _halfint(j₂), _halfint(j₃)
+    m₁′, m₂′, m₃′ = _halfint(m₁), _halfint(m₂), _halfint(m₃)
+    if isnothing(j₁′) || isnothing(j₂′) || isnothing(j₃′) ||
+            isnothing(m₁′) || isnothing(m₂′) || isnothing(m₃′)
+        _throw3j(j₁, j₂, j₃, m₁, m₂, m₃)
+    end
+    ϵ(j₁′, m₁′) & ϵ(j₂′, m₂′) & ϵ(j₃′, m₃′) || _throw3j(j₁, j₂, j₃, m₁, m₂, m₃)
+    return _wigner3j(T, j₁′, j₂′, j₃′, m₁′, m₂′, m₃′)
 end
 
-function _wigner3j(T::Type{<:Real}, j₁::HalfInteger, j₂::HalfInteger, j₃::HalfInteger,
-                                    m₁::HalfInteger, m₂::HalfInteger, m₃::HalfInteger)
-    # check triangle condition and m₁+m₂+m₃ == 0
-    if !δ(j₁, j₂, j₃) || !iszero(m₁+m₂+m₃)
-        return zero(T)
+@noinline function _throw3j(j₁, j₂, j₃, m₁, m₂, m₃)
+    for (jᵢ, mᵢ) in ((j₁, m₁), (j₂, m₂), (j₃, m₃))
+        ϵ(jᵢ, mᵢ) || throw(DomainError((jᵢ, mᵢ), "invalid combination (jᵢ, mᵢ)"))
     end
+    # not reached, but guarantees that this function never returns, which allows the
+    # compiler to exclude `nothing` from the converted arguments at the call sites
+    throw(ArgumentError("arguments do not fit in `HalfInt`"))
+end
 
-    # we reorder such that j₁ >= j₂ >= j₃ and m₁ >= 0 or m₁ == 0 && m₂ >= 0
-    j₁, j₂, j₃, m₁, m₂, m₃, sgn = reorder3j(j₁, j₂, j₃, m₁, m₂, m₃)
-    # TODO: do we also want to use Regge symmetries?
-    α₁ = convert(Int, j₂ - m₁ - j₃ ) # can be negative
-    α₂ = convert(Int, j₁ + m₂ - j₃ ) # can be negative
-    β₁ = convert(UInt, j₁ + j₂ - j₃ )
-    β₂ = convert(UInt, j₁ - m₁ )
-    β₃ = convert(UInt, j₂ + m₂ )
+# for valid (jᵢ, mᵢ)
+@inline function _wigner3j(
+        T::Type{<:Real}, j₁::HalfInt, j₂::HalfInt, j₃::HalfInt,
+        m₁::HalfInt, m₂::HalfInt, m₃::HalfInt
+    )
+    iszero(m₁ + m₂ + m₃) || return zero(T)
+    R = _reggesquare(j₁, j₂, j₃, m₁, m₂, m₃)
+    _isvalid(R) || return zero(T) # triangle condition
+    # canonical form under all 72 symmetries
+    key, odd = canonicalize(R)
+    # odd permutations of rows or columns of the Regge square yield a sign (-1)^J
+    return _value(T, key, odd & isodd(convert(Int, j₁ + j₂ + j₃)))
+end
 
-    # extra sign in definition: α₁ - α₂ = j₁ + m₂ - j₂ + m₁ = j₁ - j₂ + m₃
-    sgn = isodd(α₁ - α₂) ? -sgn : sgn
-
-    # dictionary lookup or compute
-    rs = get(Wigner3j, (β₁, β₂, β₃, α₁, α₂), nothing)
-    if !isnothing(rs)
-        r, s = rs
-    else
-        s1n, s1d = Δ²(j₁, j₂, j₃)
-        s2n = prod(map(primefactorial, (β₂, β₁ - α₁, β₁ - α₂, β₃, β₃ - α₁, β₂ - α₂)))
-
-        snum, rnum = splitsquare(s1n*s2n)
-        sden, rden = splitsquare(s1d)
-        snum, sden = divgcd!(snum, sden)
-        rnum, rden = divgcd!(rnum, rden)
-        s = Base.unsafe_rational(convert(BigInt, snum), convert(BigInt, sden))
-        r = Base.unsafe_rational(convert(BigInt, rnum), convert(BigInt, rden))
-        s *= compute3jseries(β₁, β₂, β₃, α₁, α₂)
-        Wigner3j[(β₁, β₂, β₃, α₁, α₂)] = (r,s)
+# value of the Wigner symbol with canonical key `key`, with an additional sign if `flip`
+function _value(T::Type{<:CachedFloat}, key, flip::Bool = false)
+    v = _get!(_floatcache(key), key) do key
+        r, s = get(() -> _exact(key), _exactcache(key), key) # does not store exact value
+        return _float64(r, s)
     end
-    return _convert(T, sgn*s)*convert(T, signedroot(r))
+    return convert(T, (flip & !iszero(v)) ? -v : v)
+end
+function _value(T::Type{<:Real}, key, flip::Bool = false)
+    cache = _exactcache(key)
+    rs = get(cache, key, nothing)
+    if isnothing(rs)
+        rs = _exact(key)
+        cache[key] = rs
+    end
+    r, s = rs
+    return convert(T, flip ? -s : s) * convert(T, signedroot(r))
 end
 
 """
@@ -127,14 +205,26 @@ as a type `T` real number. By default, `T = RationalRoot{BigInt}` and `m₃ = m�
 Returns `zero(T)` if the triangle condition `δ(j₁, j₂, j₃)` is not satisfied, but
 throws a `DomainError` if the `jᵢ`s and `mᵢ`s are not (half)integer or `abs(mᵢ) > jᵢ`.
 """
-clebschgordan(j₁, m₁, j₂, m₂, j₃, m₃ = m₁+m₂) =
-    clebschgordan(RRBig, j₁, m₁, j₂, m₂, j₃, m₃)
-function clebschgordan(T::Type{<:Real}, j₁, m₁, j₂, m₂, j₃, m₃ = m₁+m₂)
+clebschgordan(j₁, m₁, j₂, m₂, j₃) = clebschgordan(RRBig, j₁, m₁, j₂, m₂, j₃)
+clebschgordan(j₁, m₁, j₂, m₂, j₃, m₃) = clebschgordan(RRBig, j₁, m₁, j₂, m₂, j₃, m₃)
+function clebschgordan(T::Type{<:Real}, j₁, m₁, j₂, m₂, j₃)
+    s = wigner3j(T, j₁, j₂, j₃, m₁, m₂)
+    iszero(s) && return s
+    # arguments are valid if s is nonzero
+    return _clebschgordan(T, s, _validhalfint(j₁), _validhalfint(j₂), _validhalfint(j₃), _validhalfint(m₁) + _validhalfint(m₂))
+end
+function clebschgordan(T::Type{<:Real}, j₁, m₁, j₂, m₂, j₃, m₃)
     s = wigner3j(T, j₁, j₂, j₃, m₁, m₂, -m₃)
     iszero(s) && return s
-    s *= convert(T, signedroot(RRBig, j₃+j₃+one(j₃)))
-    return isodd(convert(Int,j₁ - j₂ + m₃)) ? -s : s
+    # arguments are valid if s is nonzero
+    return _clebschgordan(T, s, _validhalfint(j₁), _validhalfint(j₂), _validhalfint(j₃), _validhalfint(m₃))
 end
+function _clebschgordan(T::Type{<:Real}, s, j₁::HalfInt, j₂::HalfInt, j₃::HalfInt, m₃::HalfInt)
+    s *= _sqrt(T, convert(Int, 2 * j₃ + 1))
+    return isodd(convert(Int, j₁ - j₂ + m₃)) ? -s : s
+end
+_sqrt(T::Type{<:AbstractFloat}, n::Int) = sqrt(convert(T, n))
+_sqrt(T::Type{<:Real}, n::Int) = convert(T, signedroot(RRBig, n))
 
 """
     racahV(T::Type{<:Real} = RationalRoot{BigInt}, j₁, j₂, j₃, m₁, m₂, m₃ = -m₁-m₂) -> ::T
@@ -147,10 +237,12 @@ as a type `T` real number. By default, `T = RationalRoot{BigInt}` and `m₃ = -m
 Returns `zero(T)` if the triangle condition `δ(j₁, j₂, j₃)` is not satisfied, but
 throws a `DomainError` if the `jᵢ`s and `mᵢ`s are not (half)integer or `abs(mᵢ) > jᵢ`.
 """
-racahV(j₁, j₂, j₃, m₁, m₂, m₃ = -m₁-m₂) = racahV(RRBig, j₁, j₂, j₃, m₁, m₂, m₃)
-function racahV(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂, m₃ = -m₁-m₂)
-    s = wigner3j(T, j₁, j₂, j₃, m₁, m₂, m₃)
-    return isodd(convert(Int, -j₁ + j₂ + j₃)) ? -s : s
+racahV(j₁, j₂, j₃, m₁, m₂, m₃...) = racahV(RRBig, j₁, j₂, j₃, m₁, m₂, m₃...)
+function racahV(T::Type{<:Real}, j₁, j₂, j₃, m₁, m₂, m₃...)
+    s = wigner3j(T, j₁, j₂, j₃, m₁, m₂, m₃...)
+    iszero(s) && return s
+    # arguments are valid if s is nonzero
+    return isodd(convert(Int, -_validhalfint(j₁) + _validhalfint(j₂) + _validhalfint(j₃))) ? -s : s
 end
 
 """
@@ -167,59 +259,33 @@ the `jᵢ`s are not integer or halfinteger.
 """
 wigner6j(j₁, j₂, j₃, j₄, j₅, j₆) = wigner6j(RRBig, j₁, j₂, j₃, j₄, j₅, j₆)
 function wigner6j(T::Type{<:Real}, j₁, j₂, j₃, j₄, j₅, j₆)
-    # check validity of `jᵢ`s
+    j₁′, j₂′, j₃′, j₄′, j₅′, j₆′ = _halfint(j₁), _halfint(j₂), _halfint(j₃), _halfint(j₄), _halfint(j₅), _halfint(j₆)
+    if isnothing(j₁′) || isnothing(j₂′) || isnothing(j₃′) ||
+            isnothing(j₄′) || isnothing(j₅′) || isnothing(j₆′)
+        _throw6j(j₁, j₂, j₃, j₄, j₅, j₆)
+    end
+    min(j₁′, j₂′, j₃′, j₄′, j₅′, j₆′) >= 0 || _throw6j(j₁, j₂, j₃, j₄, j₅, j₆)
+    return _wigner6j(T, j₁′, j₂′, j₃′, j₄′, j₅′, j₆′)
+end
+
+@noinline function _throw6j(j₁, j₂, j₃, j₄, j₅, j₆)
     for jᵢ in (j₁, j₂, j₃, j₄, j₅, j₆)
         (ishalfinteger(jᵢ) && jᵢ >= zero(jᵢ)) || throw(DomainError(jᵢ, "invalid jᵢ"))
     end
-    return _wigner6j(T, HalfInteger.((j₁, j₂, j₃, j₄, j₅, j₆))...)
+    # not reached, but guarantees that this function never returns, which allows the
+    # compiler to exclude `nothing` from the converted arguments at the call sites
+    throw(ArgumentError("arguments do not fit in `HalfInt`"))
 end
 
-function _wigner6j(T::Type{<:Real}, j₁::HalfInteger, j₂::HalfInteger, j₃::HalfInteger,
-                                    j₄::HalfInteger, j₅::HalfInteger, j₆::HalfInteger)
-    α̂₁ = (j₁, j₂, j₃)
-    α̂₂ = (j₁, j₆, j₅)
-    α̂₃ = (j₂, j₄, j₆)
-    α̂₄ = (j₃, j₄, j₅)
-
+# for valid jᵢ
+@inline function _wigner6j(
+        T::Type{<:Real}, j₁::HalfInt, j₂::HalfInt, j₃::HalfInt,
+        j₄::HalfInt, j₅::HalfInt, j₆::HalfInt
+    )
     # check triangle conditions
-    if !(δ(α̂₁...) && δ(α̂₂...) && δ(α̂₃...) && δ(α̂₄...))
-        return zero(T)
-    end
-    # reduce
-    α₁ = convert(UInt, +(α̂₁...))
-    α₂ = convert(UInt, +(α̂₂...))
-    α₃ = convert(UInt, +(α̂₃...))
-    α₄ = convert(UInt, +(α̂₄...))
-    β₁ = convert(UInt, j₁+j₂+j₄+j₅)
-    β₂ = convert(UInt, j₁+j₃+j₄+j₆)
-    β₃ = convert(UInt, j₂+j₃+j₅+j₆)
-
-    # we should have αᵢ < βⱼ, ∀ i, j and ∑ᵢ αᵢ = ∑ⱼ βⱼ
-    # now order them as β₁ >= β₂ >= β₃ >= α₁ >= α₂ >= α₃ >= α₄
-    (β₁, β₂, β₃, α₁, α₂, α₃, α₄) = reorder6j(β₁, β₂, β₃, α₁, α₂, α₃, α₄)
-
-    # dictionary lookup or compute
-    rs = get(Wigner6j, (β₁, β₂, β₃, α₁, α₂, α₃), nothing)
-    if !isnothing(rs)
-        r, s = rs
-    else
-        # order irrelevant: product remains the same under action of reorder6j
-        n₁, d₁ = Δ²(α̂₁...)
-        n₂, d₂ = Δ²(α̂₂...)
-        n₃, d₃ = Δ²(α̂₃...)
-        n₄, d₄ = Δ²(α̂₄...)
-
-        snum, rnum = splitsquare(n₁ * n₂ * n₃ * n₄)
-        sden, rden = splitsquare(d₁ * d₂ * d₃ * d₄)
-        snum, sden = divgcd!(snum, sden)
-        rnum, rden = divgcd!(rnum, rden)
-        s = Base.unsafe_rational(convert(BigInt, snum), convert(BigInt, sden))
-        r = Base.unsafe_rational(convert(BigInt, rnum), convert(BigInt, rden))
-        s *= compute6jseries(β₁, β₂, β₃, α₁, α₂, α₃, α₄)
-
-        Wigner6j[(β₁, β₂, β₃, α₁, α₂, α₃)] = (r, s)
-    end
-    return _convert(T, s) * convert(T, signedroot(r))
+    δ(j₁, j₂, j₃) & δ(j₁, j₆, j₅) & δ(j₂, j₄, j₆) & δ(j₃, j₄, j₅) || return zero(T)
+    # canonical form under all 144 symmetries
+    return _value(T, key6j(j₁, j₂, j₃, j₄, j₅, j₆))
 end
 
 """
@@ -236,11 +302,9 @@ the `jᵢ`s and `J`s are not integer or halfinteger.
 racahW(j₁, j₂, J, j₃, J₁₂, J₂₃) = racahW(RRBig, j₁, j₂, J, j₃, J₁₂, J₂₃)
 function racahW(T::Type{<:Real}, j₁, j₂, J, j₃, J₁₂, J₂₃)
     s = wigner6j(T, j₁, j₂, J₁₂, j₃, J, J₂₃)
-    if !iszero(s) && isodd(convert(Int, j₁ + j₂ + j₃ + J))
-        return -s
-    else
-        return s
-    end
+    iszero(s) && return s
+    # arguments are valid if s is nonzero
+    return isodd(convert(Int, _validhalfint(j₁) + _validhalfint(j₂) + _validhalfint(j₃) + _validhalfint(J))) ? -s : s
 end
 
 # COMPUTATIONAL ROUTINES
@@ -257,42 +321,61 @@ function Δ²(j₁, j₂, j₃)
     return divgcd!(num, den)
 end
 
-# reorder parameters determining the 3j symbol to canonical order:
-# j₁ >= j₂ >= j₃ and m₁ >= 0 or m₁ == 0 && m₂ >= 0
-function reorder3j(j₁, j₂, j₃, m₁, m₂, m₃, sign = one(Int8))
-    if j₁ < j₂
-        return reorder3j(j₂, j₁, j₃, m₂, m₁, m₃, -sign)
-    elseif j₂ < j₃
-        return reorder3j(j₁, j₃, j₂, m₁, m₃, m₂, -sign)
-    elseif m₁ < zero(m₁)
-        return reorder3j(j₁, j₂, j₃, -m₁, -m₂, -m₃, -sign)
-    elseif iszero(m₁) && m₂ < zero(m₂)
-        return reorder3j(j₁, j₂, j₃, -m₁, -m₂, -m₃, -sign)
-    else
-        # sign doesn't matter if total J=j₁ + j₂ + j₃ is even
-        if iseven(convert(UInt,j₁ + j₂ + j₃))
-            sign = one(sign)
-        end
-        return (j₁, j₂, j₃, m₁, m₂, m₃, sign)
+# exact value `(r, s)` of the canonical 3j symbol, such that the 3j symbol equals `s * √r`
+function _exact(key::Key3j)
+    L, X, T, B, S = key
+    J = S + X + L + B - T
+    # Regge square of the canonical 3j symbol, with columns 1 and 3 interchanged
+    # (yielding a sign (-1)^J), such that the series has S+1 terms:
+    #     ⎡ J-S-L  L      S     ⎤
+    # R = ⎢ J-X-B  B      X     ⎥
+    #     ⎣ T      J-L-B  J-S-X ⎦
+    R = (J - S - L, J - X - B, T, L, B, J - L - B, S, X, J - S - X)
+    # Racah formula in terms of the Regge square
+    β₁, β₂, β₃ = R[7], R[2], R[6]
+    α₁, α₂ = R[7] - R[3], R[7] - R[5]
+
+    num = copy(primefactorial(R[1]))
+    for k in 2:9
+        num = mul!(num, primefactorial(R[k]))
     end
+    den = copy(primefactorial(J + 1))
+    num, den = divgcd!(num, den)
+    snum, rnum = splitsquare(num)
+    sden, rden = splitsquare(den)
+    snum, sden = divgcd!(snum, sden)
+    rnum, rden = divgcd!(rnum, rden)
+    s = Base.unsafe_rational(convert(BigInt, snum), convert(BigInt, sden))
+    r = Base.unsafe_rational(convert(BigInt, rnum), convert(BigInt, rden))
+    s *= compute3jseries(β₁, β₂, β₃, α₁, α₂)
+    # sign (-1)^(α₁-α₂) from Racah formula, and (-1)^J from interchanging columns
+    if isodd(α₁ - α₂ + J)
+        s = -s
+    end
+    return r, s
 end
 
-# reorder parameters determining the 6j symbol to canonical order:
-# β₁ >= β₂ >= β₃ >= α₁ >= α₂ >= α₃ >= α₄
-function reorder6j(β₁, β₂, β₃, α₁, α₂, α₃, α₄)
-    if β₁ < β₂
-        return reorder6j(β₂, β₁, β₃, α₁, α₂, α₃, α₄)
-    elseif β₂ < β₃
-        return reorder6j(β₁, β₃, β₂, α₁, α₂, α₃, α₄)
-    elseif α₁ < α₂
-        return reorder6j(β₁, β₂, β₃, α₂, α₁, α₃, α₄)
-    elseif α₂ < α₃
-        return reorder6j(β₁, β₂, β₃, α₁, α₃, α₂, α₄)
-    elseif α₃ < α₄
-        return reorder6j(β₁, β₂, β₃, α₁, α₂, α₄, α₃)
-    else
-        return (β₁, β₂, β₃, α₁, α₂, α₃, α₄)
+# exact value `(r, s)` of the canonical 6j symbol, such that the 6j symbol equals `s * √r`
+function _exact(key::Key6j)
+    β₁, β₂, β₃, α₁, α₂, α₃, α₄ = _sums(key)
+    # product of the four squared triangle coefficients
+    num = one(PrimeFactorization{UInt32})
+    for β in (β₁, β₂, β₃), α in (α₁, α₂, α₃, α₄)
+        num = mul!(num, primefactorial(β - α))
     end
+    den = copy(primefactorial(α₁ + 1))
+    for α in (α₂, α₃, α₄)
+        den = mul!(den, primefactorial(α + 1))
+    end
+    num, den = divgcd!(num, den)
+    snum, rnum = splitsquare(num)
+    sden, rden = splitsquare(den)
+    snum, sden = divgcd!(snum, sden)
+    rnum, rden = divgcd!(rnum, rden)
+    s = Base.unsafe_rational(convert(BigInt, snum), convert(BigInt, sden))
+    r = Base.unsafe_rational(convert(BigInt, rnum), convert(BigInt, rden))
+    s *= compute6jseries(β₁, β₂, β₃, α₁, α₂, α₃, α₄)
+    return r, s
 end
 
 # compute the sum appearing in the 3j symbol
